@@ -2,6 +2,7 @@ package org.example.lab3.controller;
 
 import org.example.lab3.model.AddNodeRequest;
 import org.example.lab3.model.FileOwnerResponse;
+import org.example.lab3.model.NeighbourResponse;
 import org.example.lab3.model.NodeInfo;
 import org.example.lab3.service.NodeRegistry;
 import org.springframework.http.ResponseEntity;
@@ -37,5 +38,24 @@ public class NamingServerController {
         }
         FileOwnerResponse resp = new FileOwnerResponse(owner.getId(), owner.getIp());
         return ResponseEntity.ok(resp);
+    }
+
+    /**
+     * Returns the previous and next node of a given node ID.
+     *
+     * This is used during FAILURE RECOVERY:
+     * A surviving node that detects a dead neighbour calls this to find out
+     * who the dead node's other neighbour was, so it can stitch the ring back together.
+     *
+     * @param id The hash ID of the (possibly dead) node whose neighbours we want.
+     * @return A NeighbourResponse containing prevId and nextId.
+     */
+    @GetMapping("/nodes/neighbours/{id}")
+    public ResponseEntity<NeighbourResponse> getNeighbours(@PathVariable int id) {
+        NeighbourResponse neighbours = registry.getNeighbours(id);
+        if (neighbours == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(neighbours);
     }
 }
