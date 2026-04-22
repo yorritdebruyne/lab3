@@ -82,7 +82,8 @@ public class BootstrapService {
         try (MulticastSocket socket = new MulticastSocket(multicastPort)) {
 
             InetAddress group = InetAddress.getByName(multicastGroup);
-            socket.joinGroup(group);
+            NetworkInterface networkInterface = NetworkInterface.getByIndex(0);
+            socket.joinGroup(new InetSocketAddress(group, multicastPort), networkInterface);
 
             // --- Step 2: broadcast our name and IP ---
             String  message = nodeName + ":" + nodeIp;

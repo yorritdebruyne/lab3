@@ -64,7 +64,8 @@ public class MulticastListener {
 
             // Join the multicast group so the OS delivers packets to us.
             InetAddress group = InetAddress.getByName(multicastGroup);
-            socket.joinGroup(group);
+            NetworkInterface networkInterface = NetworkInterface.getByIndex(0);
+            socket.joinGroup(new InetSocketAddress(group, multicastPort), networkInterface);
 
             System.out.println("[MulticastListener] Listening on " + multicastGroup + ":" + multicastPort);
 
