@@ -45,10 +45,12 @@ public class ShutdownService {
     private final NodeState    state;
     private final NodeIpLookup ipLookup;
     private final RestTemplate restTemplate = new RestTemplate();
+    private final ReplicationShutdownService replicationShutdownService;
 
-    public ShutdownService(NodeState state, NodeIpLookup ipLookup) {
+    public ShutdownService(NodeState state, NodeIpLookup ipLookup, ReplicationShutdownService replicationShutdownService) {
         this.state    = state;
         this.ipLookup = ipLookup;
+        this.replicationShutdownService = replicationShutdownService;
     }
 
     /**
@@ -56,6 +58,9 @@ public class ShutdownService {
      */
     @PreDestroy
     public void shutdown() {
+        // Transfer replica files BEFORE updating ring pointers
+        replicationShutdownService.transferReplicasOnShutdown();
+
         System.out.println("[Shutdown] Starting graceful shutdown. State: " + state);
 
         int myId   = state.getCurrentId();

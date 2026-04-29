@@ -1,5 +1,6 @@
 package org.example.lab3.controller;
 
+import org.example.lab3.model.ReplicaRequest;
 import org.example.lab3.model.AddNodeRequest;
 import org.example.lab3.model.FileOwnerResponse;
 import org.example.lab3.model.NeighbourResponse;
@@ -59,5 +60,18 @@ public class NamingServerController {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.ok(neighbours);
+    }
+
+    /**
+     * Receives a filename from a node and returns which node should store the replica.
+     * Uses the existing findOwnerForFile ring algorithm: node.hash < file.hash.
+     */
+    @PostMapping("/files/replicate")
+    public ResponseEntity<NodeInfo> getReplicaNode(@RequestBody ReplicaRequest req) {
+        NodeInfo replicaNode = registry.findOwnerForFile(req.getFilename());
+        if (replicaNode == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(replicaNode);
     }
 }

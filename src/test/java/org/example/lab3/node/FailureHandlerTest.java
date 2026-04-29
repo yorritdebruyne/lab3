@@ -69,7 +69,8 @@ class FailureHandlerTest {
         state.setNextId(100);
         state.setName("nodeA");
 
-        ShutdownService shutdownService = new ShutdownService(state, ipLookup);
+        ReplicationShutdownService replicationShutdownService = mock(ReplicationShutdownService.class);
+        ShutdownService shutdownService = new ShutdownService(state, ipLookup, replicationShutdownService);
         shutdownService.shutdown();
 
         verify(ipLookup, never()).getIpForId(anyInt());
