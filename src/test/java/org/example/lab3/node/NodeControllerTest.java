@@ -11,10 +11,10 @@ class NodeControllerTest {
 
     @BeforeEach
     void setup() {
-        state      = new NodeState();
-        // FileLogService has no dependencies so we can just instantiate it directly
+        state = new NodeState();
         FileLogService fileLogService = new FileLogService();
-        controller = new NodeController(state, fileLogService);
+        FileRegistry fileRegistry = new FileRegistry(); // add this
+        controller = new NodeController(state, fileLogService, fileRegistry);
     }
 
     @Test
