@@ -7,15 +7,17 @@ import static org.mockito.Mockito.*;
 
 class FailureHandlerTest {
 
-    private NodeState      state;
-    private NodeIpLookup   ipLookup;
-    private FailureHandler failureHandler;
+    private NodeState       state;
+    private NodeIpLookup    ipLookup;
+    private AgentDispatcher agentDispatcher; // Lab 6: added
+    private FailureHandler  failureHandler;
 
     @BeforeEach
     void setup() {
-        state          = new NodeState();
-        ipLookup       = mock(NodeIpLookup.class);
-        failureHandler = new FailureHandler(state, ipLookup);
+        state           = new NodeState();
+        ipLookup        = mock(NodeIpLookup.class);
+        agentDispatcher = mock(AgentDispatcher.class); // Lab 6: added
+        failureHandler  = new FailureHandler(state, ipLookup, agentDispatcher);
     }
 
     @Test
@@ -69,10 +71,41 @@ class FailureHandlerTest {
         state.setNextId(100);
         state.setName("nodeA");
 
-        ReplicationShutdownService replicationShutdownService = mock(ReplicationShutdownService.class);
-        ShutdownService shutdownService = new ShutdownService(state, ipLookup, replicationShutdownService);
+        ReplicationShutdownService replicationShutdown =
+                mock(ReplicationShutdownService.class);
+        ShutdownService shutdownService =
+                new ShutdownService(state, ipLookup, replicationShutdown);
         shutdownService.shutdown();
 
         verify(ipLookup, never()).getIpForId(anyInt());
+    }
+
+    // ── Lab 6: FailureAgent launch tests ─────────────────────
+
+    @Test
+    void failureAgentIsNotLaunched_whenAloneInRing() {
+        // If we are alone (next == current), there is nobody to send the agent to
+        state.setCurrentId(12);
+        state.setPrevId(12);
+        state.setNextId(12); // alone
+
+        // handleFailure will fail early because the naming server is unreachable,
+        // but we can verify dispatch was never called regardless
+        failureHandler.handleFailure(5, "nodeC");
+
+        verify(agentDispatcher, never()).dispatch(any(), any());
+    }
+
+    @Test
+    void failureAgentIsNotLaunched_whenNextIpIsNull() {
+        // If we can't find the next node's IP, the agent should not be launched
+        state.setCurrentId(12);
+        state.setNextId(17);
+
+        when(ipLookup.getIpForId(anyInt())).thenReturn(null); // no IPs found
+
+        failureHandler.handleFailure(5, "nodeC");
+
+        verify(agentDispatcher, never()).dispatch(any(), any());
     }
 }

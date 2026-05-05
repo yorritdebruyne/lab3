@@ -35,6 +35,7 @@ public class NodeController {
 
     private final NodeState      state;
     private final FileLogService fileLogService;
+    private final FileRegistry fileRegistry;
 
     // Folder where replica files are stored — matches TcpFileServer
     @Value("${node.replicas.dir:replicas}")
@@ -44,13 +45,14 @@ public class NodeController {
     @Value("${node.local.dir:local}")
     private String localDir;
 
-    public NodeController(NodeState state, FileLogService fileLogService) {
+    public NodeController(NodeState state, FileLogService fileLogService, FileRegistry fileRegistry) {
         this.state          = state;
         this.fileLogService = fileLogService;
+        this.fileRegistry = fileRegistry;
     }
 
     // =========================================================================
-    // Lab 4 endpoints — unchanged
+    // Lab 4 endpoints
     // =========================================================================
 
     /**
@@ -97,7 +99,7 @@ public class NodeController {
     }
 
     // =========================================================================
-    // Lab 5 endpoints — new
+    // Lab 5 endpoints
     // =========================================================================
 
     /**
@@ -151,6 +153,41 @@ public class NodeController {
             System.err.println("[NodeController] Could not list local files: " + e.getMessage());
             return ResponseEntity.ok(List.of());
         }
+    }
+
+    // =========================================================================
+    // Lab 6 endpoints
+    // =========================================================================
+    /**
+     * Returns this node's full FileRegistry as a JSON array.
+     * Called by the SyncAgent on the previous neighbour every sync cycle.
+     * The caller merges the result into its own registry via AgentController.
+     */
+    @GetMapping("/filelist")
+    public ResponseEntity<List<FileEntry>> getFileList() {
+        return ResponseEntity.ok(fileRegistry.getAll());
+    }
+
+    /**
+     * Locks a file in this node's FileRegistry.
+     * The lock propagates to all nodes on the next SyncAgent cycle.
+     */
+    @PutMapping("/lock/{filename}")
+    public ResponseEntity<Void> lockFile(@PathVariable String filename) {
+        System.out.println("[NodeController] Locking: " + filename);
+        fileRegistry.lock(filename);
+        return ResponseEntity.ok().build();
+    }
+
+    /**
+     * Releases the lock on a file in this node's FileRegistry.
+     * The unlock propagates to all nodes on the next SyncAgent cycle.
+     */
+    @PutMapping("/unlock/{filename}")
+    public ResponseEntity<Void> unlockFile(@PathVariable String filename) {
+        System.out.println("[NodeController] Unlocking: " + filename);
+        fileRegistry.unlock(filename);
+        return ResponseEntity.ok().build();
     }
 
     // =========================================================================
