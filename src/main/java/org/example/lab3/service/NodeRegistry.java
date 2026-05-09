@@ -19,12 +19,16 @@ public class NodeRegistry {
     public NodeRegistry(HashService hashService, NodeRegistryStorage storage) {
         this.hashService = hashService;
         this.storage = storage;
-
         // Load from disk
         storage.load().forEach(n -> nodes.put(n.getId(), n));
     }
 
-    public synchronized NodeInfo addNode(String name, String ip) {
+    /**
+     * Registers a new node with name, IP and port.
+     * The port is stored so NodeIpLookup can return the correct port
+     * for each node, enabling multi-node localhost testing.
+     */
+    public synchronized NodeInfo addNode(String name, String ip, int port) {
         boolean exists = nodes.values().stream()
                 .anyMatch(n -> n.getName().equals(name));
 
@@ -33,11 +37,19 @@ public class NodeRegistry {
         }
 
         int id = hashService.hashToRing(name);
-        NodeInfo node = new NodeInfo(id, name, ip);
+        NodeInfo node = new NodeInfo(id, name, ip, port);
 
         nodes.put(id, node);
         storage.save(nodes.values());
         return node;
+    }
+
+    /**
+     * Backwards-compatible overload — uses default port 8081.
+     * Used by existing tests that don't pass a port.
+     */
+    public synchronized NodeInfo addNode(String name, String ip) {
+        return addNode(name, ip, 8081);
     }
 
     public synchronized NodeInfo getNode(int id) {
@@ -76,6 +88,14 @@ public class NodeRegistry {
      */
     public synchronized int getNodeCount() {
         return nodes.size();
+    }
+
+    /**
+     * Returns all nodes in the registry.
+     * Used by GET /api/nodes (GUI lab).
+     */
+    public synchronized Collection<NodeInfo> getAllNodes() {
+        return new ArrayList<>(nodes.values());
     }
 
     /**

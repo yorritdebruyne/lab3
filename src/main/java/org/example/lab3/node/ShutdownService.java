@@ -11,18 +11,17 @@ import jakarta.annotation.PreDestroy;
 /**
  * ShutdownService handles a GRACEFUL shutdown of this node.
  *
- * Spring calls the shutdown() method automatically when the application
- * is stopping — triggered by CTRL-C, a SIGTERM signal, or
- * calling SpringApplication.exit().
- * The @PreDestroy annotation is what makes Spring call it automatically.
+ * Spring calls shutdown() automatically when the application stops —
+ * triggered by CTRL-C, SIGTERM, or SpringApplication.exit().
+ * The @PreDestroy annotation is what makes Spring call it.
  *
  * === What we do (from the slides, Shutdown section) ===
  *
  * 1. Tell the PREVIOUS node: "your new next is my current next."
- *    PUT http://{prevIp}/node/next  { id: this.nextId }
+ *    PUT http://{prevAddr}/node/next  { id: this.nextId }
  *
  * 2. Tell the NEXT node: "your new prev is my current prev."
- *    PUT http://{nextIp}/node/prev  { id: this.prevId }
+ *    PUT http://{nextAddr}/node/prev  { id: this.prevId }
  *
  * 3. Remove ourselves from the naming server's ring map.
  *    DELETE /api/nodes/{name}
@@ -31,6 +30,14 @@ import jakarta.annotation.PreDestroy;
  *
  * Note: if we are the only node (prev == next == self), steps 1 and 2
  * are skipped because there are no neighbours to notify.
+ *
+ * === Port handling ===
+ *
+ * NodeIpLookup now returns "ip:port" (e.g. "127.0.0.1:8082") instead of
+ * just the IP. This means ShutdownService no longer needs its own peerPort
+ * field — the correct port for each neighbour comes from the naming server
+ * via NodeIpLookup. This fixes the localhost multi-node testing issue where
+ * all nodes share 127.0.0.1 but use different ports.
  */
 @Service
 @Profile("node")
@@ -39,26 +46,21 @@ public class ShutdownService {
     @Value("${namingserver.url}")
     private String namingServerUrl;
 
-    @Value("${node.peer.port:8081}")
-    private int peerPort;
-
-    private final NodeState    state;
-    private final NodeIpLookup ipLookup;
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final NodeState                  state;
+    private final NodeIpLookup               ipLookup;
     private final ReplicationShutdownService replicationShutdownService;
+    private final RestTemplate               restTemplate = new RestTemplate();
 
-    public ShutdownService(NodeState state, NodeIpLookup ipLookup, ReplicationShutdownService replicationShutdownService) {
-        this.state    = state;
-        this.ipLookup = ipLookup;
+    public ShutdownService(NodeState state, NodeIpLookup ipLookup,
+                           ReplicationShutdownService replicationShutdownService) {
+        this.state                      = state;
+        this.ipLookup                   = ipLookup;
         this.replicationShutdownService = replicationShutdownService;
     }
 
-    /**
-     * Called automatically by Spring on application shutdown.
-     */
     @PreDestroy
     public void shutdown() {
-        // Transfer replica files BEFORE updating ring pointers
+        // Lab 5: transfer replica files to prev before disconnecting
         replicationShutdownService.transferReplicasOnShutdown();
 
         System.out.println("[Shutdown] Starting graceful shutdown. State: " + state);
@@ -67,18 +69,18 @@ public class ShutdownService {
         int prevId = state.getPrevId();
         int nextId = state.getNextId();
 
-        // Only notify neighbours if we are NOT alone in the ring
         boolean alone = (prevId == myId && nextId == myId);
 
         if (!alone) {
 
             // --- Step 1: tell prev its new next is our current next ---
-            String prevIp = ipLookup.getIpForId(prevId);
-            if (prevIp != null) {
+            // ipLookup returns "ip:port" so we can build the URL directly
+            String prevAddr = ipLookup.getIpForId(prevId);
+            if (prevAddr != null) {
                 try {
                     NeighbourUpdate req = new NeighbourUpdate();
-                    req.setId(nextId); // prev.next = this.next
-                    restTemplate.put("http://" + prevIp + ":" + peerPort + "/node/next", req);
+                    req.setId(nextId);
+                    restTemplate.put("http://" + prevAddr + "/node/next", req);
                     System.out.println("[Shutdown] Told prev (" + prevId + ") new next = " + nextId);
                 } catch (Exception e) {
                     System.err.println("[Shutdown] Could not reach prev: " + e.getMessage());
@@ -86,12 +88,12 @@ public class ShutdownService {
             }
 
             // --- Step 2: tell next its new prev is our current prev ---
-            String nextIp = ipLookup.getIpForId(nextId);
-            if (nextIp != null) {
+            String nextAddr = ipLookup.getIpForId(nextId);
+            if (nextAddr != null) {
                 try {
                     NeighbourUpdate req = new NeighbourUpdate();
-                    req.setId(prevId); // next.prev = this.prev
-                    restTemplate.put("http://" + nextIp + ":" + peerPort + "/node/prev", req);
+                    req.setId(prevId);
+                    restTemplate.put("http://" + nextAddr + "/node/prev", req);
                     System.out.println("[Shutdown] Told next (" + nextId + ") new prev = " + prevId);
                 } catch (Exception e) {
                     System.err.println("[Shutdown] Could not reach next: " + e.getMessage());

@@ -26,8 +26,15 @@ import java.util.stream.Stream;
  *   3. If prev already has this file locally → go to prev.prev (edge case)
  *   4. Transfer the replica file to the chosen target node over TCP
  *
- * For each file in local/ (our own local files):
- *   1. Notify the owner node that our download location is going away
+ * === Port handling ===
+ *
+ * NodeIpLookup now returns "ip:port" (e.g. "127.0.0.1:8082") instead of
+ * just the IP. All URL construction in this class uses the returned address
+ * directly without appending a port manually. This fixes localhost
+ * multi-node testing where each node has a different port.
+ *
+ * For NodeInfo-based URLs (owner lookups), we use owner.getIp() + ":" +
+ * owner.getPort() since NodeInfo now stores the port.
  */
 @Service
 @Profile("node")
@@ -41,9 +48,6 @@ public class ReplicationShutdownService {
 
     @Value("${namingserver.url}")
     private String namingServerUrl;
-
-    @Value("${server.port:8081}")
-    private int serverPort;
 
     private final NodeState      state;
     private final NodeIpLookup   ipLookup;
@@ -73,25 +77,32 @@ public class ReplicationShutdownService {
             return;
         }
 
-        String prevIp = ipLookup.getIpForId(state.getPrevId());
-        if (prevIp == null) {
+        // ipLookup returns "ip:port" — use directly in URLs, no port appended manually
+        String prevAddr = ipLookup.getIpForId(state.getPrevId());
+        if (prevAddr == null) {
             System.err.println("[ReplicationShutdown] Cannot find prev node IP.");
             return;
         }
 
-        List<String> prevLocalFiles = getLocalFilesOf(prevIp);
+        // Extract just the IP for TcpFileClient (TCP uses its own port)
+        String prevIp = prevAddr.contains(":") ? prevAddr.split(":")[0] : prevAddr;
+
+        List<String> prevLocalFiles = getLocalFilesOf(prevAddr);
 
         for (Path replicaFile : replicaFiles) {
-            String filename = replicaFile.getFileName().toString();
-            String targetIp = prevIp;
+            String filename  = replicaFile.getFileName().toString();
+            String targetIp  = prevIp;
 
             if (prevLocalFiles.contains(filename)) {
                 // Edge case: prev already has this file locally → go to prev.prev
                 System.out.println("[ReplicationShutdown] Edge case: prev has "
                         + filename + " locally → going to prev.prev");
-                String prevPrevIp = getPrevPrevIp(state.getPrevId());
-                if (prevPrevIp != null) {
-                    targetIp = prevPrevIp;
+                String prevPrevAddr = getPrevPrevAddr(state.getPrevId());
+                if (prevPrevAddr != null) {
+                    // Extract IP for TCP
+                    targetIp = prevPrevAddr.contains(":")
+                            ? prevPrevAddr.split(":")[0]
+                            : prevPrevAddr;
                 } else {
                     System.err.println("[ReplicationShutdown] No prev.prev found for: " + filename);
                     continue;
@@ -111,6 +122,9 @@ public class ReplicationShutdownService {
 
     /**
      * Notifies the owner of each local file that our node is shutting down.
+     *
+     * Uses owner.getIp() + ":" + owner.getPort() to build the URL because
+     * the owner comes from a NodeInfo object (not from NodeIpLookup).
      */
     private void transferLocalFileNotifications() {
         for (Path localFile : listFiles(localDir)) {
@@ -121,10 +135,11 @@ public class ReplicationShutdownService {
                         NodeInfo.class
                 );
                 if (owner != null && owner.getId() != state.getCurrentId()) {
-                    restTemplate.delete("http://" + owner.getIp() + ":" + serverPort
+                    // Use owner.getIp() + ":" + owner.getPort() — correct port per node
+                    restTemplate.delete("http://" + owner.getIp() + ":" + owner.getPort()
                             + "/node/replica/" + filename);
                     System.out.println("[ReplicationShutdown] Notified owner "
-                            + owner.getIp() + " about: " + filename);
+                            + owner.getIp() + ":" + owner.getPort() + " about: " + filename);
                 }
             } catch (Exception e) {
                 System.err.println("[ReplicationShutdown] Could not notify for: "
@@ -133,23 +148,31 @@ public class ReplicationShutdownService {
         }
     }
 
-    /** Gets the local file list of a remote node via GET /node/files */
-    private List<String> getLocalFilesOf(String ip) {
+    /**
+     * Gets the local file list of a remote node via GET /node/files.
+     *
+     * @param addr "ip:port" address of the target node (from NodeIpLookup)
+     */
+    private List<String> getLocalFilesOf(String addr) {
         try {
+            // addr is already "ip:port" — use directly, no port appended
             String[] files = restTemplate.getForObject(
-                    "http://" + ip + ":" + serverPort + "/node/files",
+                    "http://" + addr + "/node/files",
                     String[].class
             );
             return files != null ? List.of(files) : List.of();
         } catch (Exception e) {
             System.err.println("[ReplicationShutdown] Could not get files from "
-                    + ip + ": " + e.getMessage());
+                    + addr + ": " + e.getMessage());
             return List.of();
         }
     }
 
-    /** Gets the IP of prev.prev by asking the naming server for prev's neighbours */
-    private String getPrevPrevIp(int prevId) {
+    /**
+     * Gets the "ip:port" address of prev.prev by asking the naming server
+     * for prev's neighbours, then looking up the prev.prev node.
+     */
+    private String getPrevPrevAddr(int prevId) {
         try {
             NeighbourResponse neighbours = restTemplate.getForObject(
                     namingServerUrl + "/api/nodes/neighbours/" + prevId,

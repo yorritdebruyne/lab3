@@ -7,15 +7,19 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 /**
- * NodeIpLookup answers the question: "Given a ring ID, what is that node's IP?"
+ * NodeIpLookup answers: "Given a ring ID, what is that node's address?"
  *
- * We ask the naming server via GET /api/nodes/{id}.
- * (I added this endpoint to NamingServerController in step 5 of the earlier work.)
+ * Returns "ip:port" as a single string (e.g. "127.0.0.1:8082") so that
+ * callers can build REST URLs directly:
  *
- * This is used by:
- *   - ShutdownService: to find the IP of prev and next so it can call them
- *   - FailureHandler:  to find the IPs of the neighbours of the dead node
- *   - PingScheduler:   to know which IP to ping
+ *   String addr = ipLookup.getIpForId(nextId);
+ *   restTemplate.put("http://" + addr + "/node/next", req);
+ *
+ * Storing and returning the port is essential for localhost testing where
+ * multiple nodes share IP 127.0.0.1 but listen on different ports.
+ * On a real distributed deployment each node has a unique IP, so the port
+ * component is always 8081 — but returning ip:port works correctly in
+ * both cases.
  */
 @Service
 @Profile("node")
@@ -27,10 +31,12 @@ public class NodeIpLookup {
     private final RestTemplate restTemplate = new RestTemplate();
 
     /**
-     * Returns the IP address of the node with the given ring ID,
-     * by asking the naming server. Returns null if not found.
+     * Returns "ip:port" for the node with the given ring ID,
+     * by asking the naming server GET /api/nodes/{id}.
+     * Returns null if the node is not found.
      *
-     * @param nodeId  The hash ring ID of the node we want to find.
+     * @param nodeId  The hash ring ID of the node to look up.
+     * @return "ip:port" string, e.g. "127.0.0.1:8082", or null if not found.
      */
     public String getIpForId(int nodeId) {
         try {
@@ -38,7 +44,8 @@ public class NodeIpLookup {
                     namingServerUrl + "/api/nodes/" + nodeId,
                     NodeInfo.class
             );
-            return (info != null) ? info.getIp() : null;
+            if (info == null) return null;
+            return info.getIp() + ":" + info.getPort();
         } catch (Exception e) {
             System.err.println("[NodeIpLookup] Could not find IP for id=" + nodeId
                     + ": " + e.getMessage());
