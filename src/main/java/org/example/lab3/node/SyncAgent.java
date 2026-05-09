@@ -17,11 +17,6 @@ import java.util.List;
  * syncs its FileRegistry with the next neighbour by calling
  * POST /agent/receive with a SYNC payload.
  *
- * The SYNC payload carries the current node's FileRegistry contents.
- * The receiving node merges the incoming list into its own registry
- * and responds — but we don't need the response here because the
- * AgentController on the next node handles the merge itself.
- *
  * === What happens each sync cycle ===
  *
  * 1. Scan local/ folder → register any new files in FileRegistry
@@ -34,13 +29,17 @@ import java.util.List;
  *
  * When a file is locked here (via PUT /node/lock/{filename}),
  * the lock flag is set in FileRegistry. On the next sync cycle,
- * the locked entry is included in the payload sent to the next node.
- * That node merges it, sees the lock, and propagates it further
- * on its own next sync cycle. After one full ring traversal,
- * every node knows the file is locked.
+ * the locked entry travels to the next node. That node merges it,
+ * sees the lock, and propagates it further on its own next sync cycle.
+ * After one full ring traversal every node knows the file is locked.
  *
- * @Order(3) ensures this starts after BootstrapService (@Order defaults)
- * and FileScanner (@Order(2)).
+ * === Port handling ===
+ *
+ * NodeIpLookup returns "ip:port" (e.g. "127.0.0.1:8082").
+ * SyncAgent passes this directly to AgentDispatcher which no longer
+ * appends its own port — fixing localhost multi-node testing.
+ *
+ * @Order(3) ensures this starts after BootstrapService and FileScanner.
  */
 @Service
 @Profile("node")
@@ -66,10 +65,9 @@ public class SyncAgent {
         this.ipLookup     = ipLookup;
     }
 
-
     /**
      * Starts the sync loop in a background daemon thread after Spring is ready.
-     * We wait 4 seconds so bootstrap and neighbour discovery have settled first.
+     * Waits 4 seconds so bootstrap and neighbour discovery have settled first.
      */
     @EventListener(ApplicationReadyEvent.class)
     public void startSyncLoop() {
@@ -82,27 +80,20 @@ public class SyncAgent {
      * The main sync loop — runs forever until the node shuts down.
      */
     private void syncLoop() {
-        // Wait for bootstrap + neighbour updates to settle
         try { Thread.sleep(4000); } catch (InterruptedException ignored) {}
 
         System.out.println("[SyncAgent] Started on node " + state.getCurrentId());
 
         while (!Thread.currentThread().isInterrupted()) {
             try {
-                // Step 1: scan local folder and register any new files
                 scanLocalFiles();
-
-                // Steps 2 + 3: send our registry to the next node
                 pushToNextNode();
-
                 Thread.sleep(syncIntervalMs);
-
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 System.out.println("[SyncAgent] Stopping.");
                 break;
             } catch (Exception e) {
-                // Never let an exception kill the sync loop permanently
                 System.err.println("[SyncAgent] Error: " + e.getMessage());
             }
         }
@@ -131,30 +122,30 @@ public class SyncAgent {
      * Builds a SYNC payload from our current FileRegistry and sends it
      * to the next neighbour via AgentDispatcher.
      *
+     * NodeIpLookup returns "ip:port" which is passed directly to
+     * AgentDispatcher — no port manipulation needed here.
+     *
      * Skipped if we are alone in the ring (next == self).
      */
     private void pushToNextNode() {
         int myId   = state.getCurrentId();
         int nextId = state.getNextId();
 
-        // Don't send if alone in the ring or not yet initialised
         if (nextId == myId || nextId == -1) return;
 
-        String nextIp = ipLookup.getIpForId(nextId);
-        if (nextIp == null) return;
+        // ipLookup returns "ip:port" — pass directly to dispatcher
+        String nextAddr = ipLookup.getIpForId(nextId);
+        if (nextAddr == null) return;
 
-        // Build the payload with everything we know
         List<FileEntry> allEntries = fileRegistry.getAll();
         AgentPayload payload = AgentPayload.forSync(allEntries);
 
-        dispatcher.dispatch(nextIp, payload);
+        dispatcher.dispatch(nextAddr, payload);
     }
 
     /**
      * Locks a file in the local registry.
      * The lock propagates to all nodes on the next sync cycle.
-     *
-     * @param filename The file to lock.
      */
     public void requestLock(String filename) {
         fileRegistry.lock(filename);
@@ -164,8 +155,6 @@ public class SyncAgent {
     /**
      * Releases a lock on a file in the local registry.
      * The unlock propagates to all nodes on the next sync cycle.
-     *
-     * @param filename The file to unlock.
      */
     public void releaseLock(String filename) {
         fileRegistry.unlock(filename);

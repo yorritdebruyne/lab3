@@ -144,17 +144,15 @@ public class FailureHandler {
             return;
         }
 
+        // ipLookup returns "ip:port" — pass directly to AgentDispatcher
         String nextAddr = ipLookup.getIpForId(nextId);
         if (nextAddr == null) {
             System.err.println("[FailureHandler] Cannot find next node — FailureAgent not launched.");
             return;
         }
 
-        // Extract just the IP for AgentDispatcher (it builds its own URL with port)
-        String nextIp = nextAddr.contains(":") ? nextAddr.split(":")[0] : nextAddr;
-
         AgentPayload payload = AgentPayload.forFailure(deadNodeId, myId);
-        agentDispatcher.dispatch(nextIp, payload);
+        agentDispatcher.dispatch(nextAddr, payload);
         System.out.println("[FailureHandler] FailureAgent launched toward node " + nextId);
     }
 }
