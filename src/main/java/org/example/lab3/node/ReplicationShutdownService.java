@@ -1,5 +1,6 @@
 package org.example.lab3.node;
 
+import org.example.lab3.model.FileOwnerResponse;
 import org.example.lab3.model.NeighbourResponse;
 import org.example.lab3.model.NodeInfo;
 import org.springframework.beans.factory.annotation.Value;
@@ -130,11 +131,13 @@ public class ReplicationShutdownService {
         for (Path localFile : listFiles(localDir)) {
             String filename = localFile.getFileName().toString();
             try {
-                NodeInfo owner = restTemplate.getForObject(
+                FileOwnerResponse owner = restTemplate.getForObject(
+                //NodeInfo owner = restTemplate.getForObject(
                         namingServerUrl + "/api/files/owner?filename=" + filename,
-                        NodeInfo.class
+                        //NodeInfo.class
+                        FileOwnerResponse.class
                 );
-                if (owner != null && owner.getId() != state.getCurrentId()) {
+                if (owner != null && owner.getNodeId() != state.getCurrentId()) {
                     // Use owner.getIp() + ":" + owner.getPort() — correct port per node
                     restTemplate.delete("http://" + owner.getIp() + ":" + owner.getPort()
                             + "/node/replica/" + filename);

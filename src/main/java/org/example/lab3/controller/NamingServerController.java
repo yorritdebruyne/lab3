@@ -10,6 +10,8 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Collection;
+
 @Profile("naming-server")
 @RestController
 @RequestMapping("/api")
@@ -21,9 +23,13 @@ public class NamingServerController {
         this.registry = registry;
     }
 
+    /**
+     * Registers a new node. Now passes the port from the request body
+     * so the naming server stores the correct port per node.
+     */
     @PostMapping("/nodes")
     public ResponseEntity<NodeInfo> addNode(@RequestBody AddNodeRequest req) {
-        NodeInfo node = registry.addNode(req.getName(), req.getIp());
+        NodeInfo node = registry.addNode(req.getName(), req.getIp(), req.getPort());
         return ResponseEntity.ok(node);
     }
 
@@ -33,54 +39,58 @@ public class NamingServerController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * Returns full NodeInfo (including port) for a given ring ID.
+     * Used by NodeIpLookup to get the "ip:port" address of a neighbour.
+     */
     @GetMapping("/nodes/{id}")
     public ResponseEntity<NodeInfo> getNode(@PathVariable int id) {
         NodeInfo node = registry.getNode(id);
-        if (node == null) {
-            return ResponseEntity.notFound().build();
-        }
+        if (node == null) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(node);
     }
 
+    /**
+     * Returns all nodes in the registry.
+     * Used by the GUI (Lab 7) to display the node list.
+     */
+    @GetMapping("/nodes")
+    public ResponseEntity<Collection<NodeInfo>> getAllNodes() {
+        return ResponseEntity.ok(registry.getAllNodes());
+    }
+
+    /**
+     * Returns the owner node for a given filename.
+     * Now includes the port in the response so callers can build
+     * correct URLs for localhost multi-node testing.
+     */
     @GetMapping("/files/owner")
     public ResponseEntity<FileOwnerResponse> getFileOwner(@RequestParam String filename) {
         NodeInfo owner = registry.findOwnerForFile(filename);
-        if (owner == null) {
-            return ResponseEntity.notFound().build();
-        }
-        FileOwnerResponse resp = new FileOwnerResponse(owner.getId(), owner.getIp());
-        return ResponseEntity.ok(resp);
+        if (owner == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(
+                new FileOwnerResponse(owner.getId(), owner.getIp(), owner.getPort())
+        );
     }
 
     /**
      * Returns the previous and next node of a given node ID.
-     *
-     * This is used during FAILURE RECOVERY:
-     * A surviving node that detects a dead neighbour calls this to find out
-     * who the dead node's other neighbour was, so it can stitch the ring back together.
-     *
-     * @param id The hash ID of the (possibly dead) node whose neighbours we want.
-     * @return A NeighbourResponse containing prevId and nextId.
+     * Used during failure recovery to stitch the ring back together.
      */
     @GetMapping("/nodes/neighbours/{id}")
     public ResponseEntity<NeighbourResponse> getNeighbours(@PathVariable int id) {
         NeighbourResponse neighbours = registry.getNeighbours(id);
-        if (neighbours == null) {
-            return ResponseEntity.notFound().build();
-        }
+        if (neighbours == null) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(neighbours);
     }
 
     /**
-     * Receives a filename from a node and returns which node should store the replica.
-     * Uses the existing findOwnerForFile ring algorithm: node.hash < file.hash.
+     * Returns which node should store the replica of a given file.
      */
     @PostMapping("/files/replicate")
     public ResponseEntity<NodeInfo> getReplicaNode(@RequestBody ReplicaRequest req) {
         NodeInfo replicaNode = registry.findOwnerForFile(req.getFilename());
-        if (replicaNode == null) {
-            return ResponseEntity.notFound().build();
-        }
+        if (replicaNode == null) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(replicaNode);
     }
 }
