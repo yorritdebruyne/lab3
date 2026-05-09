@@ -33,6 +33,15 @@ public class NamingServerController {
         return ResponseEntity.noContent().build();
     }
 
+    @GetMapping("/nodes/{id}")
+    public ResponseEntity<NodeInfo> getNode(@PathVariable int id) {
+        NodeInfo node = registry.getNode(id);
+        if (node == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(node);
+    }
+
     @GetMapping("/files/owner")
     public ResponseEntity<FileOwnerResponse> getFileOwner(@RequestParam String filename) {
         NodeInfo owner = registry.findOwnerForFile(filename);

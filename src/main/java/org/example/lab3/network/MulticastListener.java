@@ -24,15 +24,6 @@ import java.nio.charset.StandardCharsets;
  *      nodes that were in the network BEFORE this node joined.
  *      The new node uses this count to decide whether it is alone (count == 0)
  *      or whether it should wait for neighbour info (count > 0).
- *
- * === Important: reply address ===
- *
- * We use the IP address from the message body (nodeIp) rather than
- * packet.getAddress() for the unicast reply. On Windows, packet.getAddress()
- * returns the physical network adapter IP (e.g. 192.168.0.137) rather than
- * the loopback address (127.0.0.1) that the node is actually listening on.
- * Using the nodeIp from the message body ensures the reply reaches the correct
- * address regardless of network configuration.
  */
 @Profile("naming-server")
 @Component
@@ -76,8 +67,7 @@ public class MulticastListener {
             NetworkInterface networkInterface = NetworkInterface.getByIndex(0);
             socket.joinGroup(new InetSocketAddress(group, multicastPort), networkInterface);
 
-            System.out.println("[MulticastListener] Listening on "
-                    + multicastGroup + ":" + multicastPort);
+            System.out.println("[MulticastListener] Listening on " + multicastGroup + ":" + multicastPort);
 
             byte[] buf = new byte[256];
 
@@ -86,48 +76,38 @@ public class MulticastListener {
                 socket.receive(packet); // blocks until a packet arrives
 
                 // Decode the payload: "name:ip"
-                String message = new String(packet.getData(), 0, packet.getLength(),
-                        StandardCharsets.UTF_8).trim();
-                System.out.println("[MulticastListener] Received: " + message
-                        + " from " + packet.getAddress());
+                String message = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8).trim();
+                System.out.println("[MulticastListener] Received: " + message + " from " + packet.getAddress());
 
                 String[] parts = message.split(":");
-                if (parts.length != 2) continue; // malformed or count echo — skip
+                //if (parts.length != 2) continue; // malformed, skip
+                if (parts.length < 2) continue;
 
                 String nodeName = parts[0];
                 String nodeIp   = parts[1];
 
                 // Count existing nodes BEFORE adding the new one.
                 // This is the number the new node receives to decide if it is alone.
-                int existingCount = registry.getNodeCount();
+                int existingCount = registry.getNodeCount(); // New code added in NodeRegistry.java
 
                 // Register the node (hashes name → id, stores in the ring map).
                 try {
                     NodeInfo added = registry.addNode(nodeName, nodeIp);
-                    System.out.println("[MulticastListener] Registered node: "
-                            + added.getId() + " / " + nodeIp);
+                    System.out.println("[MulticastListener] Registered node: " + added.getId() + " / " + nodeIp);
                 } catch (IllegalArgumentException e) {
                     // Node already exists – probably a duplicate multicast packet. Ignore.
                     System.out.println("[MulticastListener] Node already exists: " + nodeName);
                 }
 
                 // Send unicast reply back to the new node with the existing count.
-                //
-                // IMPORTANT: we use nodeIp (from the message body) NOT packet.getAddress().
-                // On Windows, packet.getAddress() returns the physical network adapter IP
-                // (e.g. 192.168.0.137) rather than the loopback (127.0.0.1) that the node
-                // is actually listening on. Using nodeIp from the message body ensures the
-                // reply always reaches the correct address.
-                byte[] replyBytes = String.valueOf(existingCount)
-                        .getBytes(StandardCharsets.UTF_8);
+                // The new node is listening for this on the same port (multicastPort).
+                byte[] reply = String.valueOf(existingCount).getBytes(StandardCharsets.UTF_8);
                 DatagramPacket response = new DatagramPacket(
-                        replyBytes, replyBytes.length,
-                        InetAddress.getByName(nodeIp), // use IP from message body
-                        multicastPort                  // node listens on the same port
+                        reply, reply.length,
+                        packet.getAddress(), // reply to the sender's IP
+                        multicastPort        // the node listens for the reply on the same port
                 );
                 socket.send(response);
-                System.out.println("[MulticastListener] Sent count=" + existingCount
-                        + " to " + nodeIp);
             }
 
         } catch (Exception e) {

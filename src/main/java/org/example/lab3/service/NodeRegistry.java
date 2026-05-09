@@ -40,6 +40,10 @@ public class NodeRegistry {
         return node;
     }
 
+    public synchronized NodeInfo getNode(int id) {
+        return nodes.get(id);
+    }
+
     public synchronized void removeNode(String name) {
         Optional<Integer> key = nodes.entrySet().stream()
                 .filter(e -> e.getValue().getName().equals(name))

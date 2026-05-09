@@ -102,10 +102,16 @@ public class MulticastReceiver {
                 String   msg   = new String(pkt.getData(), 0, pkt.getLength(),
                         StandardCharsets.UTF_8).trim();
                 String[] parts = msg.split(":");
-                if (parts.length != 2) continue; // malformed packet, skip
-
+                //if (parts.length != 2) continue; // malformed packet, skip
+                // Changed from: if (parts.length != 2) continue;
+                if (parts.length < 2) continue;
                 String newName = parts[0];
                 String newIp   = parts[1];
+                // Extract port if present, otherwise fallback to local port
+                int targetPort = (parts.length >= 3) ? Integer.parseInt(parts[2]) : peerPort;
+
+//                String newName = parts[0];
+//                String newIp   = parts[1];
 
                 // IMPORTANT: ignore our OWN multicast that we sent during bootstrap
                 if (newName.equals(myName)) continue;
@@ -132,7 +138,7 @@ public class MulticastReceiver {
                     state.setNextId(newId);
                     state.setPrevId(newId);
                     // Tell the new node: prev = me, next = me  (ring of two)
-                    sendNeighbourUpdate(newIp, myId, myId);
+                    sendNeighbourUpdate(newIp, targetPort, myId, myId);
                     System.out.println("[MulticastReceiver] Was alone, new node " + newId + " is now prev+next.");
 
                 } else if (isBetweenNext(myId, newId, myNextId)) {
@@ -140,7 +146,7 @@ public class MulticastReceiver {
                     int oldNext = myNextId;
                     state.setNextId(newId);
                     // Tell new node: your prev = me (myId), your next = my old next (oldNext)
-                    sendNeighbourUpdate(newIp, myId, oldNext);
+                    sendNeighbourUpdate(newIp, targetPort, myId, oldNext);
                     System.out.println("[MulticastReceiver] Case A: updated next to " + newId);
 
                 } else if (isBetweenPrev(myPrevId, newId, myId)) {
@@ -148,7 +154,7 @@ public class MulticastReceiver {
                     int oldPrev = myPrevId;
                     state.setPrevId(newId);
                     // Tell new node: your prev = my old prev (oldPrev), your next = me (myId)
-                    sendNeighbourUpdate(newIp, oldPrev, myId);
+                    sendNeighbourUpdate(newIp, targetPort, oldPrev, myId);
                     System.out.println("[MulticastReceiver] Case B: updated prev to " + newId);
                 }
                 // else: not our neighbour, do nothing
@@ -202,8 +208,10 @@ public class MulticastReceiver {
      * @param prevId The value the new node should store as its prevId
      * @param nextId The value the new node should store as its nextId
      */
-    private void sendNeighbourUpdate(String newIp, int prevId, int nextId) {
-        String base = "http://" + newIp + ":" + peerPort;
+//    private void sendNeighbourUpdate(String newIp, int prevId, int nextId) {
+//        String base = "http://" + newIp + ":" + peerPort;
+    private void sendNeighbourUpdate(String newIp, int targetPort, int prevId, int nextId) {
+        String base = "http://" + newIp + ":" + targetPort;
         try {
             restTemplate.put(base + "/node/prev", new NeighbourUpdateRequest(prevId));
             System.out.println("[MulticastReceiver] Sent prevId=" + prevId + " to " + newIp);
