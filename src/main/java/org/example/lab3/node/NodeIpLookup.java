@@ -10,7 +10,7 @@ import org.springframework.web.client.RestTemplate;
  * NodeIpLookup answers the question: "Given a ring ID, what is that node's IP?"
  *
  * We ask the naming server via GET /api/nodes/{id}.
- * (You added this endpoint to NamingServerController in step 5 of the earlier work.)
+ * (I added this endpoint to NamingServerController in step 5 of the earlier work.)
  *
  * This is used by:
  *   - ShutdownService: to find the IP of prev and next so it can call them
