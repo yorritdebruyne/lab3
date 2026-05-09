@@ -34,6 +34,15 @@ import java.nio.charset.StandardCharsets;
  *    count > 0   →  there are other nodes; they will call PUT /node/prev
  *                   and PUT /node/next on us via REST to tell us our
  *                   neighbours. We just wait — NodeController handles those.
+ *
+ * === Important note on receiving the reply ===
+ *
+ * Because we joined the multicast group on the same socket we use to send,
+ * we may receive our OWN multicast message back before the naming server's
+ * unicast reply arrives. We detect this by checking whether the received
+ * string looks like "name:ip" (our own message) or a plain integer (the
+ * naming server's count reply). If we receive our own message, we discard
+ * it and wait again.
  */
 @Service
 @Profile("node")
@@ -95,34 +104,58 @@ public class BootstrapService {
             // --- Step 3: wait for the naming server's unicast reply (node count) ---
             // Timeout so we don't block forever if the server is down.
             socket.setSoTimeout(3000);
-            byte[]        buf   = new byte[64];
-            DatagramPacket reply = new DatagramPacket(buf, buf.length);
+            byte[] buf = new byte[64];
 
-            try {
-                socket.receive(reply);
+            // We may receive multiple packets before the naming server's reply:
+            //   - Our OWN multicast bounces back to us (contains "name:ip" with a colon)
+            //   - Other nodes' multicast messages also arrive here
+            // We keep reading packets until we get a pure integer (the count)
+            // or the socket times out.
+            while (true) {
+                try {
+                    DatagramPacket reply = new DatagramPacket(buf, buf.length);
+                    socket.receive(reply);
 
-                String countStr      = new String(reply.getData(), 0, reply.getLength(),
-                        StandardCharsets.UTF_8).trim();
-                int    existingCount = Integer.parseInt(countStr);
+                    String received = new String(reply.getData(), 0, reply.getLength(),
+                            StandardCharsets.UTF_8).trim();
 
-                System.out.println("[Bootstrap] Naming server says: "
-                        + existingCount + " node(s) existed before us.");
+                    // If the message contains a colon it is a "name:ip" multicast
+                    // message, not the naming server's count reply — skip it.
+                    if (received.contains(":")) {
+                        System.out.println("[Bootstrap] Ignoring multicast message: " + received);
+                        continue;
+                    }
 
-                if (existingCount < 1) {
-                    // We are the only node — the ring is just us.
-                    // prev and next already point to ourselves (set above).
-                    System.out.println("[Bootstrap] Alone in the network. prev=next=self.");
-                } else {
-                    // Other nodes exist. Their MulticastReceivers will send us
-                    // PUT /node/prev and PUT /node/next once they figure out
-                    // that we are their new neighbour.
-                    System.out.println("[Bootstrap] Waiting for neighbour updates from existing nodes...");
+                    // Try to parse as an integer — this is the naming server's reply
+                    int existingCount = Integer.parseInt(received);
+
+                    System.out.println("[Bootstrap] Naming server says: "
+                            + existingCount + " node(s) existed before us.");
+
+                    if (existingCount < 1) {
+                        // We are the only node — the ring is just us.
+                        // prev and next already point to ourselves (set above).
+                        System.out.println("[Bootstrap] Alone in the network. prev=next=self.");
+                    } else {
+                        // Other nodes exist. Their MulticastReceivers will send us
+                        // PUT /node/prev and PUT /node/next once they figure out
+                        // that we are their new neighbour.
+                        System.out.println("[Bootstrap] Waiting for neighbour updates from existing nodes...");
+                    }
+
+                    // We got the count — stop waiting
+                    break;
+
+                } catch (SocketTimeoutException e) {
+                    // Naming server did not reply in time.
+                    // Safe fallback: treat ourselves as alone.
+                    System.err.println("[Bootstrap] Naming server timed out — assuming alone.");
+                    break;
+                } catch (NumberFormatException e) {
+                    // Received something that is neither "name:ip" nor an integer.
+                    // Ignore and keep waiting.
+                    System.err.println("[Bootstrap] Unexpected reply format — ignoring.");
                 }
-
-            } catch (SocketTimeoutException e) {
-                // Naming server did not reply in time.
-                // Safe fallback: treat ourselves as alone.
-                System.err.println("[Bootstrap] Naming server timed out — assuming alone.");
             }
 
         } catch (Exception e) {
