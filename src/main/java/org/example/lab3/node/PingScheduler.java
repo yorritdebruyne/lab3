@@ -48,9 +48,15 @@ public class PingScheduler {
     private void pingOne(int neighbourId, String label) {
         if (neighbourId == state.getCurrentId()) return;
 
-        // ipLookup returns "ip:port" — use it directly in the URL
+        // If ipLookup returns null, the node is not in the registry anymore
+        // Treat this as a failure — trigger ring repair
         String addr = ipLookup.getIpForId(neighbourId);
-        if (addr == null) return;
+        if (addr == null) {
+            System.err.println("[PingScheduler] " + label + " node (id=" + neighbourId
+                    + ") not found in registry. Starting failure recovery.");
+            failureHandler.handleFailure(neighbourId, null);
+            return;
+        }
 
         try {
             restTemplate.getForObject("http://" + addr + "/node/ping", String.class);

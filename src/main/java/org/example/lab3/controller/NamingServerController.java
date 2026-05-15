@@ -15,6 +15,7 @@ import java.util.Collection;
 @Profile("naming-server")
 @RestController
 @RequestMapping("/api")
+@CrossOrigin(origins = "*")
 public class NamingServerController {
 
     private final NodeRegistry registry;

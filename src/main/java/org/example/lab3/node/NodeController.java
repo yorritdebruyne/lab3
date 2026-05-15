@@ -31,6 +31,7 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/node")
 @Profile("node")
+@CrossOrigin(origins = "*")
 public class NodeController {
 
     private final NodeState      state;

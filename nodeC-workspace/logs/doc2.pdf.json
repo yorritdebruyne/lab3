@@ -1,0 +1,5 @@
+{
+  "filename" : "doc2.pdf",
+  "downloadLocation" : "127.0.0.1",
+  "replicaLocations" : [ "127.0.0.1" ]
+}
