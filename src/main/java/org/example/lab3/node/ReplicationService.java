@@ -91,7 +91,7 @@ public class ReplicationService {
             return;
         }
 
-        tcpClient.sendFile(filePath, replicaNode.getIp());
+        tcpClient.sendFile(filePath, replicaNode.getIp(), replicaNode.getTcpPort());
     }
 
     private static class ReplicaRequestBody {

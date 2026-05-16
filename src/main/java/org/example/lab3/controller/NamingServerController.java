@@ -30,7 +30,7 @@ public class NamingServerController {
      */
     @PostMapping("/nodes")
     public ResponseEntity<NodeInfo> addNode(@RequestBody AddNodeRequest req) {
-        NodeInfo node = registry.addNode(req.getName(), req.getIp(), req.getPort());
+        NodeInfo node = registry.addNode(req.getName(), req.getIp(), req.getPort(), req.getTcpPort());
         return ResponseEntity.ok(node);
     }
 

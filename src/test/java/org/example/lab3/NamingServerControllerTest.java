@@ -17,7 +17,7 @@ class NamingServerControllerUnitTest {
         NamingServerController controller = new NamingServerController(registry);
 
         NodeInfo node = new NodeInfo(100, "node1", "1.2.3.4");
-        when(registry.addNode("node1", "1.2.3.4")).thenReturn(node);
+        when(registry.addNode("node1", "1.2.3.4", 8081, 9000)).thenReturn(node);
 
         AddNodeRequest req = new AddNodeRequest();
         req.setName("node1");

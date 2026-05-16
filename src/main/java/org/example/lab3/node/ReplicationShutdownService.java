@@ -78,39 +78,35 @@ public class ReplicationShutdownService {
             return;
         }
 
-        // ipLookup returns "ip:port" — use directly in URLs, no port appended manually
-        String prevAddr = ipLookup.getIpForId(state.getPrevId());
-        if (prevAddr == null) {
+        NodeInfo prevNode = ipLookup.getNodeForId(state.getPrevId());
+        if (prevNode == null) {
             System.err.println("[ReplicationShutdown] Cannot find prev node IP.");
             return;
         }
 
-        // Extract just the IP for TcpFileClient (TCP uses its own port)
-        String prevIp = prevAddr.contains(":") ? prevAddr.split(":")[0] : prevAddr;
-
+        String prevAddr = prevNode.getIp() + ":" + prevNode.getPort();
         List<String> prevLocalFiles = getLocalFilesOf(prevAddr);
 
         for (Path replicaFile : replicaFiles) {
-            String filename  = replicaFile.getFileName().toString();
-            String targetIp  = prevIp;
+            String filename     = replicaFile.getFileName().toString();
+            String targetIp     = prevNode.getIp();
+            int    targetTcpPort = prevNode.getTcpPort();
 
             if (prevLocalFiles.contains(filename)) {
                 // Edge case: prev already has this file locally → go to prev.prev
                 System.out.println("[ReplicationShutdown] Edge case: prev has "
                         + filename + " locally → going to prev.prev");
-                String prevPrevAddr = getPrevPrevAddr(state.getPrevId());
-                if (prevPrevAddr != null) {
-                    // Extract IP for TCP
-                    targetIp = prevPrevAddr.contains(":")
-                            ? prevPrevAddr.split(":")[0]
-                            : prevPrevAddr;
+                NodeInfo prevPrevNode = getPrevPrevNode(state.getPrevId());
+                if (prevPrevNode != null) {
+                    targetIp      = prevPrevNode.getIp();
+                    targetTcpPort = prevPrevNode.getTcpPort();
                 } else {
                     System.err.println("[ReplicationShutdown] No prev.prev found for: " + filename);
                     continue;
                 }
             }
 
-            boolean ok = tcpClient.sendFile(replicaFile, targetIp);
+            boolean ok = tcpClient.sendFile(replicaFile, targetIp, targetTcpPort);
             if (ok) {
                 System.out.println("[ReplicationShutdown] Transferred: "
                         + filename + " to " + targetIp);
@@ -171,18 +167,14 @@ public class ReplicationShutdownService {
         }
     }
 
-    /**
-     * Gets the "ip:port" address of prev.prev by asking the naming server
-     * for prev's neighbours, then looking up the prev.prev node.
-     */
-    private String getPrevPrevAddr(int prevId) {
+    private NodeInfo getPrevPrevNode(int prevId) {
         try {
             NeighbourResponse neighbours = restTemplate.getForObject(
                     namingServerUrl + "/api/nodes/neighbours/" + prevId,
                     NeighbourResponse.class
             );
             if (neighbours == null) return null;
-            return ipLookup.getIpForId(neighbours.getPrevId());
+            return ipLookup.getNodeForId(neighbours.getPrevId());
         } catch (Exception e) {
             System.err.println("[ReplicationShutdown] Could not get prev.prev: " + e.getMessage());
             return null;

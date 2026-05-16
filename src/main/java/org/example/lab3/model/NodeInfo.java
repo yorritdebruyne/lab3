@@ -20,9 +20,9 @@ public class NodeInfo {
     private int id;
     private String name;
     private String ip;
-    private int port;  // HTTP peer port — needed for localhost multi-node testing
+    private int port;     // HTTP peer port
+    private int tcpPort;  // TCP replication port
 
-    // No-arg constructor required by Jackson for JSON deserialization
     public NodeInfo(){}
 
     public NodeInfo(int id, String name, String ip){
@@ -30,13 +30,23 @@ public class NodeInfo {
         this.name = name;
         this.ip = ip;
         this.port = 8081;
+        this.tcpPort = 9000;
     }
 
     public NodeInfo(int id, String name, String ip, int port) {
-        this.id   = id;
-        this.name = name;
-        this.ip   = ip;
-        this.port = port;
+        this.id      = id;
+        this.name    = name;
+        this.ip      = ip;
+        this.port    = port;
+        this.tcpPort = 9000;
+    }
+
+    public NodeInfo(int id, String name, String ip, int port, int tcpPort) {
+        this.id      = id;
+        this.name    = name;
+        this.ip      = ip;
+        this.port    = port;
+        this.tcpPort = tcpPort;
     }
 
     public int getId() {return id;}
@@ -45,12 +55,14 @@ public class NodeInfo {
     public void setName(String name) {this.name = name;}
     public String getIp() {return ip;}
     public void setIp(String ip) {this.ip = ip;}
-    public int    getPort()          { return port; }
-    public void   setPort(int port)  { this.port = port; }
+    public int    getPort()             { return port; }
+    public void   setPort(int port)     { this.port = port; }
+    public int    getTcpPort()          { return tcpPort; }
+    public void   setTcpPort(int p)     { this.tcpPort = p; }
 
     @Override
     public String toString() {
         return "NodeInfo{id=" + id + ", name='" + name
-                + "', ip='" + ip + "', port=" + port + "}";
+                + "', ip='" + ip + "', port=" + port + ", tcpPort=" + tcpPort + "}";
     }
 }

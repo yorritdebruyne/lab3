@@ -23,9 +23,6 @@ import java.nio.file.*;
 @Profile("node")
 public class TcpFileClient {
 
-    @Value("${node.tcp.port:9000}")
-    private int tcpPort;
-
     private final NodeState state;
 
     public TcpFileClient(NodeState state) {
@@ -33,16 +30,19 @@ public class TcpFileClient {
     }
 
     /**
-     * Sends a file to the target IP.
+     * Sends a file to the target node.
      *
-     * @param filePath  Path to the file to send
-     * @param targetIp  IP address of the receiving node
+     * @param filePath      Path to the file to send
+     * @param targetIp      IP address of the receiving node
+     * @param targetTcpPort TCP port of the receiving node's TcpFileServer
      * @return true if successful, false on error
      */
-    public boolean sendFile(Path filePath, String targetIp) {
+    public boolean sendFile(Path filePath, String targetIp, int targetTcpPort) {
         String filename = filePath.getFileName().toString();
+        System.out.println("[TcpFileClient] Connecting to " + targetIp + ":" + targetTcpPort
+                + " for " + filename);
 
-        try (Socket socket = new Socket(targetIp, tcpPort);
+        try (Socket socket = new Socket(targetIp, targetTcpPort);
              DataOutputStream out = new DataOutputStream(socket.getOutputStream())) {
 
             // Send filename
@@ -62,12 +62,12 @@ public class TcpFileClient {
             out.flush();
 
             System.out.println("[TcpFileClient] Sent: " + filename
-                    + " (" + fileData.length + " bytes) to " + targetIp);
+                    + " (" + fileData.length + " bytes) to " + targetIp + ":" + targetTcpPort);
             return true;
 
         } catch (Exception e) {
             System.err.println("[TcpFileClient] Failed to send " + filename
-                    + " to " + targetIp + ": " + e.getMessage());
+                    + " to " + targetIp + ":" + targetTcpPort + ": " + e.getMessage());
             return false;
         }
     }

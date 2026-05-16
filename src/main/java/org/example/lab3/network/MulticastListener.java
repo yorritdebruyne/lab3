@@ -69,21 +69,21 @@ public class MulticastListener {
                 System.out.println("[MulticastListener] Received: " + message
                         + " from " + packet.getAddress());
 
-                // Skip anything that is not "name:ip" or "name:ip:port"
+                // Skip anything that is not "name:ip:httpPort:tcpPort"
                 String[] parts = message.split(":");
                 if (parts.length < 2) continue;
 
-                String nodeName = parts[0];
-                String nodeIp   = parts[1];
-                // Extract port if present (name:ip:port), otherwise use default
-                int    nodePort = (parts.length >= 3) ? Integer.parseInt(parts[2]) : 8081;
+                String nodeName    = parts[0];
+                String nodeIp      = parts[1];
+                int    nodePort    = (parts.length >= 3) ? Integer.parseInt(parts[2]) : 8081;
+                int    nodeTcpPort = (parts.length >= 4) ? Integer.parseInt(parts[3]) : 9000;
 
                 // Count existing nodes BEFORE adding the new one
                 int existingCount = registry.getNodeCount();
 
-                // Register the node — store name, ip AND port
+                // Register the node — store name, ip, HTTP port AND TCP port
                 try {
-                    NodeInfo added = registry.addNode(nodeName, nodeIp, nodePort);
+                    NodeInfo added = registry.addNode(nodeName, nodeIp, nodePort, nodeTcpPort);
                     System.out.println("[MulticastListener] Registered node: "
                             + added.getId() + " / " + nodeIp + ":" + nodePort);
                 } catch (IllegalArgumentException e) {

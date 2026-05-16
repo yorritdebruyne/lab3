@@ -42,7 +42,7 @@ class ReplicationServiceTest {
         fileLogService.save(log);
 
         verify(fileLogService).save(any(FileLog.class));
-        verify(tcpClient, never()).sendFile(any(), any());
+        verify(tcpClient, never()).sendFile(any(), any(), anyInt());
     }
 
     @Test
@@ -56,10 +56,10 @@ class ReplicationServiceTest {
 
         NodeInfo replicaNode = new NodeInfo(17, "nodeC", "192.168.0.4");
 
-        when(tcpClient.sendFile(any(), eq("192.168.0.4"))).thenReturn(true);
-        tcpClient.sendFile(localFile, replicaNode.getIp());
+        when(tcpClient.sendFile(any(), eq("192.168.0.4"), anyInt())).thenReturn(true);
+        tcpClient.sendFile(localFile, replicaNode.getIp(), replicaNode.getTcpPort());
 
-        verify(tcpClient).sendFile(localFile, "192.168.0.4");
+        verify(tcpClient).sendFile(localFile, "192.168.0.4", 9000);
     }
 
     private void setField(Object target, String fieldName, String value) throws Exception {

@@ -32,7 +32,6 @@ class ReplicationShutdownServiceTest {
         setField(shutdownService, "replicasDir", tempDir.resolve("replicas").toString());
         setField(shutdownService, "localDir",    tempDir.resolve("local").toString());
         setField(shutdownService, "namingServerUrl", "http://localhost:8080");
-        setField(shutdownService, "serverPort", 8081);
 
         Files.createDirectories(tempDir.resolve("replicas"));
         Files.createDirectories(tempDir.resolve("local"));
@@ -47,7 +46,7 @@ class ReplicationShutdownServiceTest {
 
         shutdownService.transferReplicasOnShutdown();
 
-        verify(tcpClient, never()).sendFile(any(), any());
+        verify(tcpClient, never()).sendFile(any(), any(), anyInt());
     }
 
     @Test
@@ -59,14 +58,14 @@ class ReplicationShutdownServiceTest {
         state.setNextId(17);
         state.setIp("192.168.0.3");
 
-        when(ipLookup.getIpForId(5)).thenReturn(null); // prevent real HTTP call
+        when(ipLookup.getNodeForId(5)).thenReturn(null); // prevent real HTTP call
         when(fileLogService.load("doc1.txt")).thenReturn(
                 new FileLog("doc1.txt", "192.168.0.5", "192.168.0.3"));
 
         shutdownService.transferReplicasOnShutdown();
 
         // ipLookup should have been called for prevId=5
-        verify(ipLookup).getIpForId(5);
+        verify(ipLookup).getNodeForId(5);
     }
 
     @Test
@@ -77,11 +76,11 @@ class ReplicationShutdownServiceTest {
         state.setCurrentId(12);
         state.setPrevId(5);
 
-        when(ipLookup.getIpForId(5)).thenReturn(null);
+        when(ipLookup.getNodeForId(5)).thenReturn(null);
 
         shutdownService.transferReplicasOnShutdown();
 
-        verify(tcpClient, never()).sendFile(any(), any());
+        verify(tcpClient, never()).sendFile(any(), any(), anyInt());
     }
 
     private void setField(Object target, String fieldName, Object value) throws Exception {

@@ -39,15 +39,19 @@ public class NodeIpLookup {
      * @return "ip:port" string, e.g. "127.0.0.1:8082", or null if not found.
      */
     public String getIpForId(int nodeId) {
+        NodeInfo info = getNodeForId(nodeId);
+        if (info == null) return null;
+        return info.getIp() + ":" + info.getPort();
+    }
+
+    public NodeInfo getNodeForId(int nodeId) {
         try {
-            NodeInfo info = restTemplate.getForObject(
+            return restTemplate.getForObject(
                     namingServerUrl + "/api/nodes/" + nodeId,
                     NodeInfo.class
             );
-            if (info == null) return null;
-            return info.getIp() + ":" + info.getPort();
         } catch (Exception e) {
-            System.err.println("[NodeIpLookup] Could not find IP for id=" + nodeId
+            System.err.println("[NodeIpLookup] Could not find node for id=" + nodeId
                     + ": " + e.getMessage());
             return null;
         }

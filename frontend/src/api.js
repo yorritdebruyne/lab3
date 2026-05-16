@@ -1,4 +1,5 @@
-const NAMING_SERVER = 'http://localhost:8080'
+//const NAMING_SERVER = 'http://localhost:8080'
+const NAMING_SERVER = window.location.origin
 
 export async function getAllNodes() {
     const res = await fetch(`${NAMING_SERVER}/api/nodes`)

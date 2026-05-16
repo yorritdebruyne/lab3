@@ -24,32 +24,29 @@ public class NodeRegistry {
     }
 
     /**
-     * Registers a new node with name, IP and port.
-     * The port is stored so NodeIpLookup can return the correct port
-     * for each node, enabling multi-node localhost testing.
+     * Registers or updates a node (upsert).
+     * If a node with the same name already exists (e.g. after a naming server
+     * restart loading stale nodes.json), the old entry is replaced so that
+     * the fresh httpPort and tcpPort are stored and nodes.json is rewritten.
      */
-    public synchronized NodeInfo addNode(String name, String ip, int port) {
-        boolean exists = nodes.values().stream()
-                .anyMatch(n -> n.getName().equals(name));
-
-        if (exists) {
-            throw new IllegalArgumentException("Node name already exists");
-        }
+    public synchronized NodeInfo addNode(String name, String ip, int port, int tcpPort) {
+        // Remove stale entry for this name so re-registration always refreshes ports
+        nodes.values().removeIf(n -> n.getName().equals(name));
 
         int id = hashService.hashToRing(name);
-        NodeInfo node = new NodeInfo(id, name, ip, port);
+        NodeInfo node = new NodeInfo(id, name, ip, port, tcpPort);
 
         nodes.put(id, node);
         storage.save(nodes.values());
         return node;
     }
 
-    /**
-     * Backwards-compatible overload — uses default port 8081.
-     * Used by existing tests that don't pass a port.
-     */
+    public synchronized NodeInfo addNode(String name, String ip, int port) {
+        return addNode(name, ip, port, 9000);
+    }
+
     public synchronized NodeInfo addNode(String name, String ip) {
-        return addNode(name, ip, 8081);
+        return addNode(name, ip, 8081, 9000);
     }
 
     public synchronized NodeInfo getNode(int id) {

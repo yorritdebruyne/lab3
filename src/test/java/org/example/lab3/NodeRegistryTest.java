@@ -41,10 +41,14 @@ class NodeRegistryTest {
     }
 
     @Test
-    void addNode_duplicateName_throws() {
-        registry.addNode("node1", "192.168.0.2");
-        assertThrows(IllegalArgumentException.class,
-                () -> registry.addNode("node1", "192.168.0.3"));
+    void addNode_duplicateName_updatesEntry() {
+        // Re-registering the same name should upsert, not throw —
+        // this handles naming-server restart with stale nodes.json
+        registry.addNode("node1", "192.168.0.2", 8081, 9001);
+        NodeInfo updated = registry.addNode("node1", "192.168.0.3", 8082, 9002);
+        assertEquals("192.168.0.3", updated.getIp());
+        assertEquals(8082, updated.getPort());
+        assertEquals(9002, updated.getTcpPort());
     }
 
     @Test

@@ -9,7 +9,7 @@ package org.example.lab3.model;
  * different port.
  */
 public class FileOwnerResponse {
-    private int NodeId;
+    private int nodeId; // lowercase n
     private String ip;
     private int port; // Needed for correct URL building on localhost
 
@@ -17,17 +17,17 @@ public class FileOwnerResponse {
     public FileOwnerResponse() {}
 
     public FileOwnerResponse(int nodeId, String ip, int port) {
-        NodeId = nodeId;
+        this.nodeId = nodeId;
         this.ip = ip;
         this.port = port;
     }
 
-    public int getNodeId() {return NodeId;}
+    public int getNodeId() {return nodeId;}
     public String getIp() {return ip;}
     public int getPort() { return port; }
 
     public void setNodeId(int nodeId) {
-        NodeId = nodeId;
+        this.nodeId = nodeId;
     }
     public void setIp(String ip) {
         this.ip = ip;
