@@ -110,35 +110,49 @@ public class AgentController {
      *   3. If this node IS the start node → terminate (full ring traversal done)
      */
     private void handleFailure(AgentPayload payload) {
-        // Step 1: run the failure recovery logic on this node
-        failureAgent.execute(payload);
+        int myId  = state.getCurrentId();
+        int hops  = payload.getHopCount();
 
-        // Step 2: decide whether to forward
-        int myId      = state.getCurrentId();
-        int startId   = payload.getStartNodeId();
-        int nextId    = state.getNextId();
-
-        // If we are back at the start node, the agent has completed the ring → stop
-        if (myId == startId) {
-            System.out.println("[AgentController] FAILURE agent completed full ring — terminating.");
+        // Termination: if we have already been visited, the ring is fully traversed → stop.
+        // We do NOT run execute() again on a second visit — this node already recovered.
+        if (payload.getVisitedNodeIds().contains(myId)) {
+            System.out.println("[AgentController] FAILURE agent completed ring at node "
+                    + myId + " (visited=" + payload.getVisitedNodeIds() + ") — terminating.");
             return;
         }
 
-        // If we are alone or next is unknown → stop
+        // Safety net: stop after MAX_HOPS regardless, in case visited list is corrupted
+        if (hops >= AgentPayload.MAX_HOPS) {
+            System.err.println("[AgentController] FAILURE agent exceeded " + AgentPayload.MAX_HOPS
+                    + " hops — terminating to prevent infinite loop.");
+            return;
+        }
+
+        // Step 1: run the failure recovery logic on this node
+        failureAgent.execute(payload);
+
+        // Mark this node as visited
+        payload.getVisitedNodeIds().add(myId);
+        payload.setHopCount(hops + 1);
+
+        System.out.println("[AgentController] FAILURE hop " + (hops + 1)
+                + ": node " + myId + " done, visited=" + payload.getVisitedNodeIds());
+
+        // Step 2: find next node
+        int nextId = state.getNextId();
+
         if (nextId == myId || nextId == -1) {
             System.out.println("[AgentController] FAILURE agent: no next node — stopping.");
             return;
         }
 
-        // Forward to the next node
         String nextIp = ipLookup.getIpForId(nextId);
         if (nextIp == null) {
             System.err.println("[AgentController] FAILURE agent: cannot find next node IP.");
             return;
         }
 
-        System.out.println("[AgentController] Forwarding FAILURE agent to next node (id="
-                + nextId + ")");
+        System.out.println("[AgentController] Forwarding FAILURE agent to next node (id=" + nextId + ")");
         dispatcher.dispatch(nextIp, payload);
     }
 }

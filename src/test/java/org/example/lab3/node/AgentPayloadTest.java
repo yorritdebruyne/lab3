@@ -40,28 +40,28 @@ class AgentPayloadTest {
 
     @Test
     void forFailure_setsTypeToFailure() {
-        AgentPayload payload = AgentPayload.forFailure(42, 10);
+        AgentPayload payload = AgentPayload.forFailure(42);
         assertEquals("FAILURE", payload.getType());
     }
 
     @Test
     void forFailure_setsFailingNodeId() {
-        AgentPayload payload = AgentPayload.forFailure(42, 10);
+        AgentPayload payload = AgentPayload.forFailure(42);
         assertEquals(42, payload.getFailingNodeId());
     }
 
     @Test
-    void forFailure_setsStartNodeId() {
-        // startNodeId is the node that created the agent —
-        // when the agent returns here, it terminates
-        AgentPayload payload = AgentPayload.forFailure(42, 10);
-        assertEquals(10, payload.getStartNodeId());
+    void forFailure_visitedNodeIds_isEmptyByDefault() {
+        // No nodes visited yet when agent is first created
+        AgentPayload payload = AgentPayload.forFailure(42);
+        assertNotNull(payload.getVisitedNodeIds());
+        assertTrue(payload.getVisitedNodeIds().isEmpty());
     }
 
     @Test
     void forFailure_fileList_isEmptyByDefault() {
         // FAILURE payloads don't carry a file list
-        AgentPayload payload = AgentPayload.forFailure(42, 10);
+        AgentPayload payload = AgentPayload.forFailure(42);
         assertNotNull(payload.getFileList());
         assertTrue(payload.getFileList().isEmpty());
     }
@@ -72,7 +72,7 @@ class AgentPayloadTest {
         AgentPayload payload = new AgentPayload();
         assertNull(payload.getType());
         assertEquals(-1, payload.getFailingNodeId());
-        assertEquals(-1, payload.getStartNodeId());
+        assertNotNull(payload.getVisitedNodeIds());
         assertNotNull(payload.getFileList());
     }
 }

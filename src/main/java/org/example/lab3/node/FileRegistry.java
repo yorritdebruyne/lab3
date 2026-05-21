@@ -132,24 +132,11 @@ public class FileRegistry {
      * @param incoming The file list extracted from an incoming AgentPayload.
      */
     public void merge(List<FileEntry> incoming) {
+        // Sync only adds new file names — it never changes lock state.
+        // Lock/unlock changes are applied by direct REST broadcast (NodeController),
+        // so stale sync payloads cannot accidentally override a freshly-set lock.
         for (FileEntry remote : incoming) {
-            entries.merge(
-                    remote.getFilename(),
-                    remote,
-                    (existing, newEntry) -> {
-                        // Propagate lock changes in both directions
-                        if (newEntry.isLocked() && !existing.isLocked()) {
-                            existing.setLocked(true);
-                            System.out.println("[FileRegistry] Lock propagated: "
-                                    + existing.getFilename());
-                        } else if (!newEntry.isLocked() && existing.isLocked()) {
-                            existing.setLocked(false);
-                            System.out.println("[FileRegistry] Unlock propagated: "
-                                    + existing.getFilename());
-                        }
-                        return existing;
-                    }
-            );
+            entries.putIfAbsent(remote.getFilename(), new FileEntry(remote.getFilename()));
         }
     }
 

@@ -4,11 +4,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestTemplate;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * NodeController exposes REST endpoints that OTHER nodes call to update
@@ -36,20 +38,21 @@ public class NodeController {
 
     private final NodeState      state;
     private final FileLogService fileLogService;
-    private final FileRegistry fileRegistry;
+    private final FileRegistry   fileRegistry;
+    private final NodeIpLookup   ipLookup;
 
-    // Folder where replica files are stored — matches TcpFileServer
     @Value("${node.replicas.dir:replicas}")
     private String replicasDir;
 
-    // Folder where local files are stored
     @Value("${node.local.dir:local}")
     private String localDir;
 
-    public NodeController(NodeState state, FileLogService fileLogService, FileRegistry fileRegistry) {
+    public NodeController(NodeState state, FileLogService fileLogService,
+                          FileRegistry fileRegistry, NodeIpLookup ipLookup) {
         this.state          = state;
         this.fileLogService = fileLogService;
-        this.fileRegistry = fileRegistry;
+        this.fileRegistry   = fileRegistry;
+        this.ipLookup       = ipLookup;
     }
 
     // =========================================================================
@@ -170,25 +173,52 @@ public class NodeController {
     }
 
     /**
-     * Locks a file in this node's FileRegistry.
-     * The lock propagates to all nodes on the next SyncAgent cycle.
+     * Locks a file in this node's FileRegistry and broadcasts the lock to all
+     * neighbours so that every node in the ring is updated immediately.
+     * The {@code broadcast} parameter prevents recursive re-broadcast when
+     * neighbours call this endpoint in response to the initial broadcast.
      */
     @PutMapping("/lock/{filename}")
-    public ResponseEntity<Void> lockFile(@PathVariable String filename) {
+    public ResponseEntity<Void> lockFile(@PathVariable String filename,
+                                         @RequestParam(defaultValue = "true") boolean broadcast) {
         System.out.println("[NodeController] Locking: " + filename);
         fileRegistry.lock(filename);
+        if (broadcast) broadcastLockState(filename, true);
         return ResponseEntity.ok().build();
     }
 
     /**
-     * Releases the lock on a file in this node's FileRegistry.
-     * The unlock propagates to all nodes on the next SyncAgent cycle.
+     * Releases the lock on a file in this node's FileRegistry and broadcasts
+     * the unlock to all neighbours for immediate ring-wide consistency.
      */
     @PutMapping("/unlock/{filename}")
-    public ResponseEntity<Void> unlockFile(@PathVariable String filename) {
+    public ResponseEntity<Void> unlockFile(@PathVariable String filename,
+                                            @RequestParam(defaultValue = "true") boolean broadcast) {
         System.out.println("[NodeController] Unlocking: " + filename);
         fileRegistry.unlock(filename);
+        if (broadcast) broadcastLockState(filename, false);
         return ResponseEntity.ok().build();
+    }
+
+    private void broadcastLockState(String filename, boolean locked) {
+        if (ipLookup == null) return;
+        String action = locked ? "lock" : "unlock";
+        int myId = state.getCurrentId();
+        RestTemplate rt = new RestTemplate();
+        Stream.of(state.getNextId(), state.getPrevId())
+              .filter(id -> id != myId && id != -1)
+              .distinct()
+              .forEach(id -> {
+                  String addr = ipLookup.getIpForId(id);
+                  if (addr == null) return;
+                  try {
+                      rt.put("http://" + addr + "/node/" + action + "/" + filename + "?broadcast=false", null);
+                      System.out.println("[NodeController] Broadcast " + action + " to " + addr);
+                  } catch (Exception e) {
+                      System.err.println("[NodeController] Broadcast " + action + " failed for " + addr
+                              + ": " + e.getMessage());
+                  }
+              });
     }
 
     // =========================================================================

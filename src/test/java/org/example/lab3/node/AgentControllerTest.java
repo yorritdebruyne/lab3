@@ -13,8 +13,8 @@ import static org.mockito.Mockito.*;
  * The key things to verify:
  *   - SYNC payloads trigger a FileRegistry merge
  *   - FAILURE payloads trigger FailureAgent.execute()
- *   - FAILURE payloads are forwarded to the next node (unless back at start)
- *   - FAILURE payloads terminate when back at the start node
+ *   - FAILURE payloads are forwarded to the next node (unless ring complete)
+ *   - FAILURE payloads terminate when this node is already in visitedNodeIds
  *
  * We use Thread.sleep() after calling receiveAgent() because the controller
  * runs the logic in a background thread and returns immediately.
@@ -64,8 +64,10 @@ class AgentControllerTest {
     }
 
     @Test
-    void syncPayload_propagatesLock() throws InterruptedException {
-        // We know about the file (unlocked); incoming says it's locked
+    void syncPayload_doesNotOverwriteLockState() throws InterruptedException {
+        // SYNC only discovers new filenames — it does NOT propagate lock state.
+        // Locks are broadcast directly via PUT /node/lock and PUT /node/unlock
+        // so that they take effect immediately without waiting for the next sync cycle.
         fileRegistry.addFile("doc1.txt");
 
         List<FileEntry> incoming = List.of(new FileEntry("doc1.txt", true));
@@ -74,8 +76,8 @@ class AgentControllerTest {
         controller.receiveAgent(payload);
         Thread.sleep(200);
 
-        assertTrue(fileRegistry.isLocked("doc1.txt"),
-                "Lock from SYNC payload should propagate into our registry");
+        assertFalse(fileRegistry.isLocked("doc1.txt"),
+                "SYNC should not overwrite lock state — locks are broadcast separately");
     }
 
     @Test
@@ -98,7 +100,7 @@ class AgentControllerTest {
         state.setNextId(17);
         when(ipLookup.getIpForId(17)).thenReturn("192.168.0.4");
 
-        AgentPayload payload = AgentPayload.forFailure(5, 28);
+        AgentPayload payload = AgentPayload.forFailure(5);
         var response = controller.receiveAgent(payload);
         assertEquals(200, response.getStatusCode().value());
     }
@@ -109,7 +111,7 @@ class AgentControllerTest {
         state.setNextId(17);
         when(ipLookup.getIpForId(17)).thenReturn("192.168.0.4");
 
-        AgentPayload payload = AgentPayload.forFailure(5, 28);
+        AgentPayload payload = AgentPayload.forFailure(5);
         controller.receiveAgent(payload);
         Thread.sleep(200);
 
@@ -118,13 +120,13 @@ class AgentControllerTest {
     }
 
     @Test
-    void failurePayload_isForwarded_whenNotBackAtStart() throws InterruptedException {
-        // We are node 12, start was node 28 → not back at start → forward
+    void failurePayload_isForwarded_whenNotYetVisited() throws InterruptedException {
+        // This node (12) has not been visited yet → run execute and forward
         state.setCurrentId(12);
         state.setNextId(17);
         when(ipLookup.getIpForId(17)).thenReturn("192.168.0.4");
 
-        AgentPayload payload = AgentPayload.forFailure(5, 28);
+        AgentPayload payload = AgentPayload.forFailure(5);
         controller.receiveAgent(payload);
         Thread.sleep(200);
 
@@ -133,19 +135,21 @@ class AgentControllerTest {
     }
 
     @Test
-    void failurePayload_terminates_whenBackAtStartNode() throws InterruptedException {
-        // We ARE the start node → the agent has completed the full ring → stop
-        state.setCurrentId(28); // we are the start node
-        state.setNextId(5);
-        when(ipLookup.getIpForId(5)).thenReturn("192.168.0.2");
+    void failurePayload_terminates_whenCurrentNodeAlreadyVisited() throws InterruptedException {
+        // Node 12 is already in visitedNodeIds → agent has completed the ring → stop
+        state.setCurrentId(12);
+        state.setNextId(17);
+        when(ipLookup.getIpForId(17)).thenReturn("192.168.0.2");
 
-        AgentPayload payload = AgentPayload.forFailure(5, 28); // startNodeId = 28 = us
+        AgentPayload payload = AgentPayload.forFailure(5);
+        payload.getVisitedNodeIds().add(12); // pre-mark this node as visited
+
         controller.receiveAgent(payload);
         Thread.sleep(200);
 
-        // FailureAgent still runs on this node
-        verify(failureAgent).execute(payload);
-        // But should NOT be forwarded further
+        // FailureAgent must NOT run again on a second visit
+        verify(failureAgent, never()).execute(any());
+        // And must NOT be forwarded further
         verify(dispatcher, never()).dispatch(any(), any());
     }
 
@@ -155,7 +159,7 @@ class AgentControllerTest {
         state.setCurrentId(12);
         state.setNextId(12); // alone
 
-        AgentPayload payload = AgentPayload.forFailure(5, 28);
+        AgentPayload payload = AgentPayload.forFailure(5);
         controller.receiveAgent(payload);
         Thread.sleep(200);
 

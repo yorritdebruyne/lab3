@@ -7,6 +7,9 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
 /**
  * FailureHandler repairs the ring after a node crash is detected.
  *
@@ -47,6 +50,11 @@ public class FailureHandler {
     private final AgentDispatcher agentDispatcher;
     private final RestTemplate    restTemplate = new RestTemplate();
 
+    // Prevents multiple concurrent or rapid-repeat recoveries for the same dead node.
+    // If PingScheduler fires again before the first repair finishes, the second call
+    // is silently dropped — only one FailureAgent per dead node is ever launched.
+    private final Set<Integer> activeRecoveries = ConcurrentHashMap.newKeySet();
+
     public FailureHandler(NodeState state, NodeIpLookup ipLookup,
                           AgentDispatcher agentDispatcher) {
         this.state           = state;
@@ -55,6 +63,19 @@ public class FailureHandler {
     }
 
     public void handleFailure(int deadNodeId, String deadNodeName) {
+        if (!activeRecoveries.add(deadNodeId)) {
+            System.out.println("[FailureHandler] Recovery for node " + deadNodeId
+                    + " already in progress — skipping duplicate.");
+            return;
+        }
+        try {
+            doHandleFailure(deadNodeId, deadNodeName);
+        } finally {
+            activeRecoveries.remove(deadNodeId);
+        }
+    }
+
+    private void doHandleFailure(int deadNodeId, String deadNodeName) {
         System.out.println("[FailureHandler] Handling failure of node id=" + deadNodeId);
 
         // Step 1: get dead node's neighbours from naming server
@@ -151,7 +172,7 @@ public class FailureHandler {
             return;
         }
 
-        AgentPayload payload = AgentPayload.forFailure(deadNodeId, myId);
+        AgentPayload payload = AgentPayload.forFailure(deadNodeId);
         agentDispatcher.dispatch(nextAddr, payload);
         System.out.println("[FailureHandler] FailureAgent launched toward node " + nextId);
     }

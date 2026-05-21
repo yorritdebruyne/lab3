@@ -1,0 +1,246 @@
+# docker-compose.yml
+# Orchestrates all 5 services that make up the distributed system:
+#
+#   naming-server  → central registry + Vue GUI static files  (internal port 8080)
+#   node-a         → ring node "nodeA"                        (internal ports 8081, 9001)
+#   node-b         → ring node "nodeBeta"                     (internal ports 8082, 9002)
+#   node-c         → ring node "nodeGamma"                    (internal ports 8083, 9003)
+#   nginx          → reverse proxy, THE ONLY public endpoint  (host port 80)
+#
+# Networking overview:
+#   All services share a private Docker network called "ring-net".
+#   On that network, every service is reachable by its service name as hostname.
+#   Example: naming-server is reachable at http://naming-server:8080 from any container.
+#   The outside world (browser, SSH) can ONLY reach nginx on port 80.
+#   The node ports (8081-8083) are invisible from outside — the firewall sees nothing.
+#
+# How the GUI works end-to-end:
+#   Browser  →  http://143.129.43.114/               →  nginx  →  naming-server:8080  (serves Vue app)
+#   Browser  →  http://143.129.43.114/api/nodes      →  nginx  →  naming-server:8080  (REST)
+#   Browser  →  http://143.129.43.114/proxy/8081/... →  nginx  →  node-a:8081         (node REST)
+
+version: "3.9"
+
+services:
+
+  # ── Naming server ────────────────────────────────────────────────────────────
+  naming-server:
+    # Build from our Dockerfile (uses target/projectDS-0.0.1-SNAPSHOT.jar)
+    build: .
+
+    # Spring Boot arguments appended to the ENTRYPOINT ["java", "-jar", "app.jar"]
+    command:
+      - "--spring.profiles.active=naming-server"
+      - "--server.port=8080"
+
+    # expose: makes the port reachable by other containers only (not the host machine)
+    expose:
+      - "8080"
+
+    # Store nodes.json in /app (inside the container) while it runs
+    working_dir: /app
+
+    volumes:
+      # Mount the Docker socket so NodeLaunchController can start/stop node containers
+      # via the Docker REST API (used by the "Add Node" GUI feature).
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    networks:
+      - ring-net
+
+  # ── Node A — "nodeA" ─────────────────────────────────────────────────────────
+  node-a:
+    build: .
+
+    command:
+      - "--spring.profiles.active=node"
+      - "--node.name=nodeA"
+      # node.ip must be the Docker service name so other containers can reach this node.
+      # On the internal network, "node-a" resolves to this container's IP.
+      - "--node.ip=node-a"
+      - "--server.port=8081"
+      - "--node.peer.port=8081"
+      - "--node.tcp.port=9001"
+      # Naming server is reachable by its service name on the internal network
+      - "--namingserver.url=http://naming-server:8080"
+
+    expose:
+      - "8081"   # HTTP REST
+      - "9001"   # TCP file replication
+
+    # Mount the workspace directory from the host so local/, replicas/, logs/ persist
+    volumes:
+      - ./nodeA-workspace:/workspace
+
+    working_dir: /workspace
+
+    # Start after the naming server so the REST registration doesn't fail immediately
+    depends_on:
+      - naming-server
+
+    networks:
+      - ring-net
+
+  # ── Node B — "nodeBeta" ──────────────────────────────────────────────────────
+  node-b:
+    build: .
+
+    command:
+      - "--spring.profiles.active=node"
+      - "--node.name=nodeBeta"
+      - "--node.ip=node-b"
+      - "--server.port=8082"
+      - "--node.peer.port=8082"
+      - "--node.tcp.port=9002"
+      - "--namingserver.url=http://naming-server:8080"
+
+    expose:
+      - "8082"
+      - "9002"
+
+    volumes:
+      - ./nodeB-workspace:/workspace
+
+    working_dir: /workspace
+
+    depends_on:
+      - naming-server
+
+    networks:
+      - ring-net
+
+  # ── Node C — "nodeGamma" ─────────────────────────────────────────────────────
+  node-c:
+    build: .
+
+    command:
+      - "--spring.profiles.active=node"
+      - "--node.name=nodeGamma"
+      - "--node.ip=node-c"
+      - "--server.port=8083"
+      - "--node.peer.port=8083"
+      - "--node.tcp.port=9003"
+      - "--namingserver.url=http://naming-server:8080"
+
+    expose:
+      - "8083"
+      - "9003"
+
+    volumes:
+      - ./nodeC-workspace:/workspace
+
+    working_dir: /workspace
+
+    depends_on:
+      - naming-server
+
+    networks:
+      - ring-net
+
+  # ── Node D — "nodeDelta" ─────────────────────────────────────────────────────
+  # This node is NOT started automatically on 'docker compose up'.
+  # It is pre-created in a stopped state via 'docker compose create node-d'.
+  # The GUI's "Add Node" button calls POST /api/nodes/launch/node-d which
+  # starts this container via the Docker socket API.
+  # After removal via the GUI, the container stops but is NOT deleted,
+  # so it can be re-launched in the same demo session.
+  node-d:
+    build: .
+
+    command:
+      - "--spring.profiles.active=node"
+      - "--node.name=nodeDelta"
+      - "--node.ip=node-d"
+      - "--server.port=8084"
+      - "--node.peer.port=8084"
+      - "--node.tcp.port=9004"
+      - "--namingserver.url=http://naming-server:8080"
+
+    expose:
+      - "8084"
+      - "9004"
+
+    volumes:
+      - ./nodeD-workspace:/workspace
+
+    working_dir: /workspace
+
+    depends_on:
+      - naming-server
+
+    networks:
+      - ring-net
+
+  # ── Node E — "nodeEpsilon" ───────────────────────────────────────────────────
+  node-e:
+    build: .
+    command:
+      - "--spring.profiles.active=node"
+      - "--node.name=nodeEpsilon"
+      - "--node.ip=node-e"
+      - "--server.port=8085"
+      - "--node.peer.port=8085"
+      - "--node.tcp.port=9005"
+      - "--namingserver.url=http://naming-server:8080"
+    expose:
+      - "8085"
+      - "9005"
+    volumes:
+      - ./nodeE-workspace:/workspace
+    working_dir: /workspace
+    depends_on:
+      - naming-server
+    networks:
+      - ring-net
+
+  # ── Node F — "nodeZeta" ──────────────────────────────────────────────────────
+  node-f:
+    build: .
+    command:
+      - "--spring.profiles.active=node"
+      - "--node.name=nodeZeta"
+      - "--node.ip=node-f"
+      - "--server.port=8086"
+      - "--node.peer.port=8086"
+      - "--node.tcp.port=9006"
+      - "--namingserver.url=http://naming-server:8080"
+    expose:
+      - "8086"
+      - "9006"
+    volumes:
+      - ./nodeF-workspace:/workspace
+    working_dir: /workspace
+    depends_on:
+      - naming-server
+    networks:
+      - ring-net
+
+  # ── Nginx reverse proxy ──────────────────────────────────────────────────────
+  nginx:
+    image: nginx:alpine   # Official lightweight Nginx image — no build needed
+
+    volumes:
+      # Mount our nginx.conf into the container (read-only — Nginx must not modify it)
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+
+    ports:
+      # THE ONLY external port mapping in this entire file.
+      # Binds host port 80 to container port 80.
+      # All traffic from the outside world enters here and nowhere else.
+      - "80:80"
+
+    depends_on:
+      - naming-server
+      - node-a
+      - node-b
+      - node-c
+
+    networks:
+      - ring-net
+
+# ── Shared network ───────────────────────────────────────────────────────────
+# All containers join "ring-net". This is what allows them to reach each other
+# by service name. Without a shared network, the containers are isolated.
+networks:
+  ring-net:
+    driver: bridge

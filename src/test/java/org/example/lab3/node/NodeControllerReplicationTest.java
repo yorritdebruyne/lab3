@@ -29,7 +29,7 @@ class NodeControllerReplicationTest {
         state          = new NodeState();
         fileLogService = mock(FileLogService.class);
         FileRegistry fileRegistry = new FileRegistry(); // add this
-        controller     = new NodeController(state, fileLogService, fileRegistry);
+        controller     = new NodeController(state, fileLogService, fileRegistry, null);
 
         // Point directories at our temp directory
         setField(controller, "replicasDir", tempDir.resolve("replicas").toString());

@@ -96,8 +96,10 @@ class FileRegistryTest {
     }
 
     // ── merge ─────────────────────────────────────────────────
-    // This is the most critical logic in Lab 6 — how file knowledge
-    // and lock state propagate around the ring via AgentPayload.
+    // merge() only discovers new filenames — it never updates lock state.
+    // Lock and unlock changes propagate immediately via PUT /node/lock and
+    // PUT /node/unlock (broadcast to all neighbours), not through SYNC.
+    // This prevents a stale SYNC cycle from overwriting a freshly-set lock.
 
     @Test
     void merge_addsNewFilesFromIncomingList() {
@@ -110,30 +112,30 @@ class FileRegistryTest {
     }
 
     @Test
-    void merge_propagatesLock_whenIncomingIsLocked() {
-        // We know about a file (unlocked); neighbour sends it as locked
-        // → we should apply the lock (lock propagation)
+    void merge_doesNotOverwriteLock_whenIncomingIsLocked() {
+        // We know about a file (unlocked); neighbour sends it as locked via SYNC.
+        // merge() must NOT change our lock state — locks come via broadcast only.
         registry.addFile("doc1.txt"); // start unlocked
 
         List<FileEntry> incoming = List.of(new FileEntry("doc1.txt", true));
         registry.merge(incoming);
 
-        assertTrue(registry.isLocked("doc1.txt"),
-                "Lock from incoming list should propagate to our registry");
+        assertFalse(registry.isLocked("doc1.txt"),
+                "SYNC merge must not propagate locks — use PUT /node/lock instead");
     }
 
     @Test
-    void merge_propagatesUnlock_whenIncomingIsUnlocked() {
-        // We have a file locked; neighbour sends it as unlocked
-        // → we should release the lock (unlock propagation)
+    void merge_doesNotOverwriteLock_whenLocalIsLocked() {
+        // We have a file locked; neighbour sends it as unlocked via SYNC.
+        // merge() must NOT release our lock — unlocks come via broadcast only.
         registry.addFile("doc1.txt");
         registry.lock("doc1.txt"); // currently locked
 
         List<FileEntry> incoming = List.of(new FileEntry("doc1.txt", false));
         registry.merge(incoming);
 
-        assertFalse(registry.isLocked("doc1.txt"),
-                "Unlock from incoming list should propagate to our registry");
+        assertTrue(registry.isLocked("doc1.txt"),
+                "SYNC merge must not release locks — use PUT /node/unlock instead");
     }
 
     @Test
@@ -156,11 +158,11 @@ class FileRegistryTest {
     }
 
     @Test
-    void merge_mixedList_addsNewAndUpdatesExisting() {
-        // Start with one known file
+    void merge_mixedList_addsNewFilesAndIgnoresLockUpdates() {
+        // Start with one known file (unlocked)
         registry.addFile("doc1.txt");
 
-        // Incoming has: doc1.txt (now locked) + a new file image1.png
+        // Incoming has: doc1.txt (locked in neighbour) + a new file image1.png
         List<FileEntry> incoming = List.of(
                 new FileEntry("doc1.txt",  true),
                 new FileEntry("image1.png", false)
@@ -168,8 +170,8 @@ class FileRegistryTest {
         registry.merge(incoming);
 
         assertEquals(2, registry.size());
-        assertTrue(registry.isLocked("doc1.txt"),   "doc1.txt should now be locked");
-        assertFalse(registry.isLocked("image1.png"), "image1.png should be unlocked");
+        assertFalse(registry.isLocked("doc1.txt"),   "existing lock state must not change");
+        assertFalse(registry.isLocked("image1.png"), "new file added as unlocked");
     }
 
     // ── getAll ────────────────────────────────────────────────

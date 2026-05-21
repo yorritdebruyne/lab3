@@ -15,11 +15,52 @@
       </div>
     </header>
 
+    <!-- Add Node Modal -->
+    <div v-if="showAddModal" class="modal-backdrop" @click.self="showAddModal = false">
+      <div class="modal">
+        <div class="modal-header">
+          <span class="modal-title">Add Node</span>
+          <button class="btn-close" @click="showAddModal = false">✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-desc">Select a node to launch. The node will start, register itself, and join the ring automatically.</p>
+
+          <p v-if="addableNodes.length === 0" class="modal-desc">All nodes are already in the ring.</p>
+
+          <!-- One row per launchable node not currently in the ring -->
+          <div
+            v-for="n in addableNodes"
+            :key="n.service"
+            class="launch-row"
+            :class="{ launching: addLoading && launchTarget === n.service }"
+          >
+            <div class="launch-info">
+              <span class="launch-name">{{ n.name }}</span>
+              <span class="launch-meta">port {{ n.port }} · TCP {{ n.tcp }}</span>
+            </div>
+            <button
+              class="btn-launch"
+              :disabled="addLoading"
+              @click="submitAddNode(n.service)"
+            >
+              {{ addLoading && launchTarget === n.service ? 'Starting...' : '▶ Start' }}
+            </button>
+          </div>
+
+          <div v-if="addError" class="add-error">{{ addError }}</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-cancel" @click="showAddModal = false">Close</button>
+        </div>
+      </div>
+    </div>
+
     <div class="layout">
       <!-- Left panel: node list -->
       <aside class="sidebar">
         <div class="panel-header">
           <h2>Nodes <span class="count-badge">{{ nodes.length }}</span></h2>
+          <button class="btn-add" @click="showAddModal = true" title="Add node">+ Add</button>
         </div>
         <NodeList
             :nodes="nodes"
@@ -44,16 +85,37 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import NodeList from './components/NodeList.vue'
 import NodeDetail from './components/NodeDetail.vue'
 import FileList from './components/FileList.vue'
-import { getAllNodes } from './api.js'
+import { getAllNodes, removeNode as apiRemoveNode, launchNode, stopNode } from './api.js'
 
 const nodes = ref([])
 const selectedNode = ref(null)
 const namingServerOnline = ref(false)
 let refreshTimer = null
+
+// Add node modal state
+const showAddModal = ref(false)
+const addLoading = ref(false)
+const addError = ref(null)
+const launchTarget = ref(null)
+
+// All nodes that can be launched or re-launched from the GUI.
+const launchableNodes = [
+  { service: 'node-a', name: 'nodeA',       port: 8081, tcp: 9001 },
+  { service: 'node-b', name: 'nodeBeta',    port: 8082, tcp: 9002 },
+  { service: 'node-c', name: 'nodeGamma',   port: 8083, tcp: 9003 },
+  { service: 'node-d', name: 'nodeDelta',   port: 8084, tcp: 9004 },
+  { service: 'node-e', name: 'nodeEpsilon', port: 8085, tcp: 9005 },
+  { service: 'node-f', name: 'nodeZeta',    port: 8086, tcp: 9006 }
+]
+
+// Only show nodes that are not currently in the ring.
+const addableNodes = computed(() =>
+  launchableNodes.filter(n => !nodes.value.some(node => node.name === n.name))
+)
 
 async function loadAll() {
   try {
@@ -79,11 +141,34 @@ function selectNode(node) {
 async function removeNode(node) {
   if (!confirm(`Remove node "${node.name}" from the ring?`)) return
   try {
-    await fetch(`http://localhost:8080/api/nodes/${node.name}`, { method: 'DELETE' })
+    await apiRemoveNode(node.name)
+    const launchable = launchableNodes.find(n => n.name === node.name)
+    if (launchable) await stopNode(launchable.service).catch(() => {})
     if (selectedNode.value?.id === node.id) selectedNode.value = null
     await loadAll()
   } catch (e) {
     alert('Could not remove node: ' + e.message)
+  }
+}
+
+async function submitAddNode(serviceName) {
+  addError.value = null
+  addLoading.value = true
+  launchTarget.value = serviceName
+  try {
+    const result = await launchNode(serviceName)
+    if (result.error) {
+      addError.value = result.error
+      return
+    }
+    showAddModal.value = false
+    // Wait a moment for the node to bootstrap and register itself
+    setTimeout(loadAll, 3000)
+  } catch (e) {
+    addError.value = 'Launch failed: ' + e.message
+  } finally {
+    addLoading.value = false
+    launchTarget.value = null
   }
 }
 
@@ -179,8 +264,11 @@ body {
 }
 
 .panel-header {
-  padding: 16px 20px;
+  padding: 12px 20px;
   border-bottom: 1px solid #1e2d4a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .panel-header h2 {
   font-size: 11px;
@@ -191,6 +279,122 @@ body {
   align-items: center;
   gap: 8px;
 }
+
+.btn-add {
+  background: #0f2a4a;
+  border: 1px solid #4a9eff;
+  color: #4a9eff;
+  font-size: 10px;
+  padding: 3px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  transition: all 0.15s;
+}
+.btn-add:hover { background: #1a3d6a; }
+
+/* Modal */
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+}
+.modal {
+  background: #0d1221;
+  border: 1px solid #1e2d4a;
+  border-radius: 10px;
+  width: 440px;
+  max-width: 95vw;
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #1e2d4a;
+}
+.modal-title { font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: #4a9eff; }
+.btn-close { background: none; border: none; color: #4a6080; cursor: pointer; font-size: 14px; }
+.btn-close:hover { color: #e74c3c; }
+
+.modal-body { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+
+.form-row { display: flex; flex-direction: column; gap: 5px; }
+.form-row label { font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: #4a6080; }
+.form-row input {
+  background: #0a0e1a;
+  border: 1px solid #1e2d4a;
+  color: #c8d8f0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.form-row input:focus { border-color: #4a9eff; }
+
+.modal-hint {
+  font-size: 10px;
+  color: #4a6080;
+  background: #0a0e1a;
+  border: 1px solid #131d30;
+  border-radius: 6px;
+  padding: 10px;
+  line-height: 1.7;
+}
+.modal-hint code {
+  display: block;
+  margin-top: 4px;
+  color: #8bc34a;
+  word-break: break-all;
+  font-size: 10px;
+}
+
+.modal-desc { font-size: 11px; color: #4a6080; margin-bottom: 4px; }
+
+.launch-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px;
+  background: #0a0e1a;
+  border: 1px solid #1e2d4a;
+  border-radius: 6px;
+  transition: border-color 0.15s;
+}
+.launch-row:hover { border-color: #4a9eff; }
+.launch-row.launching { border-color: #f39c12; }
+
+.launch-info { display: flex; flex-direction: column; gap: 3px; }
+.launch-name { font-size: 13px; color: #c8d8f0; font-weight: 600; }
+.launch-meta { font-size: 10px; color: #4a6080; letter-spacing: 1px; }
+
+.btn-launch {
+  background: #0f2a4a; border: 1px solid #4a9eff; color: #4a9eff;
+  padding: 6px 14px; border-radius: 5px; cursor: pointer;
+  font-size: 11px; letter-spacing: 1px;
+  transition: all 0.15s;
+}
+.btn-launch:hover:not(:disabled) { background: #1a3d6a; }
+.btn-launch:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.add-error { font-size: 11px; color: #e74c3c; }
+
+.modal-footer {
+  display: flex; justify-content: flex-end; gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid #1e2d4a;
+}
+.btn-cancel {
+  background: none; border: 1px solid #1e2d4a; color: #4a6080;
+  padding: 7px 16px; border-radius: 6px; cursor: pointer; font-size: 11px;
+}
+.btn-cancel:hover { border-color: #4a6080; color: #c8d8f0; }
+.btn-confirm {
+  background: #0f2a4a; border: 1px solid #4a9eff; color: #4a9eff;
+  padding: 7px 16px; border-radius: 6px; cursor: pointer; font-size: 11px;
+  letter-spacing: 1px;
+}
+.btn-confirm:hover:not(:disabled) { background: #1a3d6a; }
+.btn-confirm:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .count-badge {
   background: #1e2d4a;

@@ -1,6 +1,8 @@
 package org.example.lab3.node;
 
+import org.example.lab3.model.NodeInfo;
 import org.springframework.context.annotation.Profile;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -29,7 +31,8 @@ public class PingScheduler {
     private final NodeState      state;
     private final FailureHandler failureHandler;
     private final NodeIpLookup   ipLookup;
-    private final RestTemplate   restTemplate = new RestTemplate();
+    // 3-second timeout: a dead container should fail fast, not block the scheduler thread
+    private final RestTemplate   restTemplate = buildRestTemplate(3000);
 
     public PingScheduler(NodeState state, FailureHandler failureHandler, NodeIpLookup ipLookup) {
         this.state          = state;
@@ -48,22 +51,29 @@ public class PingScheduler {
     private void pingOne(int neighbourId, String label) {
         if (neighbourId == state.getCurrentId()) return;
 
-        // If ipLookup returns null, the node is not in the registry anymore
-        // Treat this as a failure — trigger ring repair
-        String addr = ipLookup.getIpForId(neighbourId);
-        if (addr == null) {
+        NodeInfo node = ipLookup.getNodeForId(neighbourId);
+        if (node == null) {
             System.err.println("[PingScheduler] " + label + " node (id=" + neighbourId
-                    + ") not found in registry. Starting failure recovery.");
+                    + ") not found in registry — starting failure recovery.");
             failureHandler.handleFailure(neighbourId, null);
             return;
         }
 
+        String addr = node.getIp() + ":" + node.getPort();
         try {
             restTemplate.getForObject("http://" + addr + "/node/ping", String.class);
         } catch (Exception e) {
             System.err.println("[PingScheduler] " + label + " node (id=" + neighbourId
-                    + ", addr=" + addr + ") is unreachable! Starting failure recovery.");
-            failureHandler.handleFailure(neighbourId, null);
+                    + ", addr=" + addr + ") is unreachable — starting failure recovery.");
+            // Pass the name so FailureHandler can remove the dead node from the naming server
+            failureHandler.handleFailure(neighbourId, node.getName());
         }
+    }
+
+    private static RestTemplate buildRestTemplate(int timeoutMs) {
+        var factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(timeoutMs);
+        factory.setReadTimeout(timeoutMs);
+        return new RestTemplate(factory);
     }
 }
