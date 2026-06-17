@@ -76,6 +76,7 @@
       <main class="content">
         <!-- System-wide tools (always visible) -->
         <Topology :nodes="nodes" :crashing="crashingNodes" :selectedId="selectedNode?.id" @select="selectNode" />
+        <EventFeed />
         <LoadChart :nodes="nodes" />
         <HashInspector :nodes="nodes" />
 
@@ -99,6 +100,7 @@ import FileList from './components/FileList.vue'
 import HashInspector from './components/HashInspector.vue'
 import LoadChart from './components/LoadChart.vue'
 import Topology from './components/Topology.vue'
+import EventFeed from './components/EventFeed.vue'
 import { getAllNodes, removeNode as apiRemoveNode, launchNode, stopNode } from './api.js'
 
 const nodes = ref([])
