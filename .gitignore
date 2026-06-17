@@ -31,3 +31,14 @@ build/
 
 ### VS Code ###
 .vscode/
+Claude.md
+.claude/
+frontend/node_modules/
+frontend/dist/
+nodes.json
+*/local/
+*/logs/
+*/replicas/
+local/
+logs/
+replicas/
