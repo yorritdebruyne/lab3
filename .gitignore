@@ -42,3 +42,5 @@ nodes.json
 local/
 logs/
 replicas/
+DEMO_EXPANSIONS_TIER1.md
+JOIN_REDISTRIBUTION_FIX.md

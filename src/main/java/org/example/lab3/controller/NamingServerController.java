@@ -5,12 +5,16 @@ import org.example.lab3.model.AddNodeRequest;
 import org.example.lab3.model.FileOwnerResponse;
 import org.example.lab3.model.NeighbourResponse;
 import org.example.lab3.model.NodeInfo;
+import org.example.lab3.service.EventService;
+import org.example.lab3.service.HashService;
 import org.example.lab3.service.NodeRegistry;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 
 @Profile("naming-server")
 @RestController
@@ -19,9 +23,13 @@ import java.util.Collection;
 public class NamingServerController {
 
     private final NodeRegistry registry;
+    private final HashService hashService;
+    private final EventService events;
 
-    public NamingServerController(NodeRegistry registry) {
+    public NamingServerController(NodeRegistry registry, HashService hashService, EventService events) {
         this.registry = registry;
+        this.hashService = hashService;
+        this.events = events;
     }
 
     /**
@@ -31,12 +39,18 @@ public class NamingServerController {
     @PostMapping("/nodes")
     public ResponseEntity<NodeInfo> addNode(@RequestBody AddNodeRequest req) {
         NodeInfo node = registry.addNode(req.getName(), req.getIp(), req.getPort(), req.getTcpPort());
+        if (events != null) {
+            events.publish("JOIN", node.getName() + " joined the ring (id " + node.getId() + ")", "naming-server");
+        }
         return ResponseEntity.ok(node);
     }
 
     @DeleteMapping("/nodes/{name}")
     public ResponseEntity<Void> removeNode(@PathVariable String name) {
         registry.removeNode(name);
+        if (events != null) {
+            events.publish("LEAVE", name + " left the ring", "naming-server");
+        }
         return ResponseEntity.noContent().build();
     }
 
@@ -72,6 +86,28 @@ public class NamingServerController {
         return ResponseEntity.ok(
                 new FileOwnerResponse(owner.getId(), owner.getIp(), owner.getPort())
         );
+    }
+
+    /**
+     * Returns both the ring hash of a filename and the node that owns it.
+     * Used by the GUI "hash inspector" so the displayed hash is computed by
+     * the same HashService as the ownership algorithm (no JS re-implementation).
+     * If the ring is empty, hash is still returned but owner fields are absent.
+     */
+    @GetMapping("/files/hash")
+    public ResponseEntity<Map<String, Object>> getFileHash(@RequestParam String filename) {
+        int hash = hashService.hashToRing(filename);
+        NodeInfo owner = registry.findOwnerForFile(filename);
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("filename", filename);
+        body.put("hash", hash);
+        if (owner != null) {
+            body.put("ownerId", owner.getId());
+            body.put("ownerIp", owner.getIp());
+            body.put("ownerPort", owner.getPort());
+        }
+        return ResponseEntity.ok(body);
     }
 
     /**

@@ -40,6 +40,14 @@ export async function getFileOwner(filename) {
     return res.json()
 }
 
+// Returns { filename, hash, ownerId?, ownerIp?, ownerPort? } in a single call.
+// The hash is computed server-side by HashService, so it always matches the
+// value the ownership algorithm uses. Owner fields are absent if the ring is empty.
+export async function getFileHash(filename) {
+    const res = await fetch(`${NAMING_SERVER}/api/files/hash?filename=${encodeURIComponent(filename)}`)
+    return res.json()
+}
+
 // ── Node calls — routed through Nginx reverse proxy ──────────────────────────
 // BEFORE (broken on VM): fetch(`http://${ip}:${port}/node/state`)
 //   → browser tries to open port 8081 directly → blocked by university firewall

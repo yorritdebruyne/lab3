@@ -70,11 +70,14 @@ public class MulticastReceiver {
 
     private final NodeState   state;
     private final HashService hashService;
+    private final NodeJoinRedistributionService joinRedistribution;
     private final RestTemplate restTemplate = new RestTemplate();
 
-    public MulticastReceiver(NodeState state, HashService hashService) {
-        this.state       = state;
-        this.hashService = hashService;
+    public MulticastReceiver(NodeState state, HashService hashService,
+                             NodeJoinRedistributionService joinRedistribution) {
+        this.state              = state;
+        this.hashService        = hashService;
+        this.joinRedistribution = joinRedistribution;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -140,6 +143,8 @@ public class MulticastReceiver {
                     // Tell the new node: prev = me, next = me  (ring of two)
                     sendNeighbourUpdate(newIp, targetPort, myId, myId);
                     System.out.println("[MulticastReceiver] Was alone, new node " + newId + " is now prev+next.");
+                    // We were the only node, so we own everything — some files now belong to the newcomer.
+                    triggerJoinRedistribution();
 
                 } else if (isBetweenNext(myId, newId, myNextId)) {
                     // Case A / C: new node goes between me and my next
@@ -148,6 +153,8 @@ public class MulticastReceiver {
                     // Tell new node: your prev = me (myId), your next = my old next (oldNext)
                     sendNeighbourUpdate(newIp, targetPort, myId, oldNext);
                     System.out.println("[MulticastReceiver] Case A: updated next to " + newId);
+                    // A node slotted in right after us → it may now own files we hold.
+                    triggerJoinRedistribution();
 
                 } else if (isBetweenPrev(myPrevId, newId, myId)) {
                     // Case B / D: new node goes between my prev and me
@@ -164,6 +171,15 @@ public class MulticastReceiver {
             System.err.println("[MulticastReceiver] Fatal error: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    /**
+     * Kicks off a join redistribution pass (non-blocking) when a newcomer has
+     * become our next neighbour. Null-guarded so unit tests that build this
+     * class without the service do not fail.
+     */
+    private void triggerJoinRedistribution() {
+        if (joinRedistribution != null) joinRedistribution.onNextNeighbourChanged();
     }
 
     /**

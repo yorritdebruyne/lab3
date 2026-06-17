@@ -65,20 +65,27 @@
         <NodeList
             :nodes="nodes"
             :selectedId="selectedNode?.id"
+            :crashing="crashingNodes"
             @select="selectNode"
             @remove="removeNode"
+            @kill="killNode"
         />
       </aside>
 
-      <!-- Right panel: details + files -->
+      <!-- Right panel: system tools + node details + files -->
       <main class="content">
+        <!-- System-wide tools (always visible) -->
+        <Topology :nodes="nodes" :crashing="crashingNodes" :selectedId="selectedNode?.id" @select="selectNode" />
+        <LoadChart :nodes="nodes" />
+        <HashInspector :nodes="nodes" />
+
+        <!-- Per-node detail (when a node is selected) -->
         <NodeDetail v-if="selectedNode" :node="selectedNode" />
+        <FileList v-if="selectedNode" :node="selectedNode" />
         <div v-else class="empty-state">
           <span class="empty-icon">⬡</span>
-          <p>Select a node to view details</p>
+          <p>Select a node to view its details and files</p>
         </div>
-
-        <FileList v-if="selectedNode" :node="selectedNode" />
       </main>
     </div>
   </div>
@@ -89,12 +96,19 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import NodeList from './components/NodeList.vue'
 import NodeDetail from './components/NodeDetail.vue'
 import FileList from './components/FileList.vue'
+import HashInspector from './components/HashInspector.vue'
+import LoadChart from './components/LoadChart.vue'
+import Topology from './components/Topology.vue'
 import { getAllNodes, removeNode as apiRemoveNode, launchNode, stopNode } from './api.js'
 
 const nodes = ref([])
 const selectedNode = ref(null)
 const namingServerOnline = ref(false)
 let refreshTimer = null
+
+// Names of nodes that were hard-killed (Tier 1.1) and not yet dropped from the
+// ring. Kept so the UI shows them "crashing" until the failure is detected.
+const crashingNodes = ref([])
 
 // Add node modal state
 const showAddModal = ref(false)
@@ -122,6 +136,11 @@ async function loadAll() {
     const data = await getAllNodes()
     nodes.value = data
     namingServerOnline.value = true
+    // Drop any "crashing" markers for nodes the ring has already removed —
+    // i.e. the failure was detected and recovery is done.
+    crashingNodes.value = crashingNodes.value.filter(
+      name => data.some(n => n.name === name)
+    )
     // If selected node still exists, refresh it
     if (selectedNode.value) {
       const updated = data.find(n => n.id === selectedNode.value.id)
@@ -148,6 +167,24 @@ async function removeNode(node) {
     await loadAll()
   } catch (e) {
     alert('Could not remove node: ' + e.message)
+  }
+}
+
+// Tier 1.1 — hard-kill a node to simulate a crash. We deliberately do NOT call
+// the graceful DELETE /api/nodes here: we stop the container and let the ring
+// DETECT the failure itself (PingScheduler → FailureHandler → FailureAgent).
+async function killNode(node) {
+  const svc = launchableNodes.find(n => n.name === node.name)
+  if (!svc) {
+    alert(`No Docker service is known for "${node.name}", so it can't be killed from the GUI.`)
+    return
+  }
+  if (!confirm(`Hard-kill "${node.name}"? This simulates a crash — the ring must detect and recover on its own.`)) return
+  try {
+    await stopNode(svc.service)
+    if (!crashingNodes.value.includes(node.name)) crashingNodes.value.push(node.name)
+  } catch (e) {
+    alert('Could not kill node: ' + e.message)
   }
 }
 

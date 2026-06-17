@@ -40,6 +40,7 @@ public class NodeController {
     private final FileLogService fileLogService;
     private final FileRegistry   fileRegistry;
     private final NodeIpLookup   ipLookup;
+    private final NodeJoinRedistributionService joinRedistribution;
 
     @Value("${node.replicas.dir:replicas}")
     private String replicasDir;
@@ -48,11 +49,13 @@ public class NodeController {
     private String localDir;
 
     public NodeController(NodeState state, FileLogService fileLogService,
-                          FileRegistry fileRegistry, NodeIpLookup ipLookup) {
-        this.state          = state;
-        this.fileLogService = fileLogService;
-        this.fileRegistry   = fileRegistry;
-        this.ipLookup       = ipLookup;
+                          FileRegistry fileRegistry, NodeIpLookup ipLookup,
+                          NodeJoinRedistributionService joinRedistribution) {
+        this.state              = state;
+        this.fileLogService     = fileLogService;
+        this.fileRegistry       = fileRegistry;
+        this.ipLookup           = ipLookup;
+        this.joinRedistribution = joinRedistribution;
     }
 
     // =========================================================================
@@ -73,11 +76,24 @@ public class NodeController {
 
     /**
      * Updates this node's nextId.
+     *
+     * If the new next is a DIFFERENT node, a newcomer may have slotted in just
+     * after us in the ring — which means some files we currently own may now
+     * belong to it. We kick off a (non-blocking) join redistribution pass so
+     * those files are handed over. This is the REST join path; the multicast
+     * join path triggers the same pass from MulticastReceiver.
      */
     @PutMapping("/next")
     public ResponseEntity<Void> updateNext(@RequestBody NeighbourUpdate req) {
+        int oldNext = state.getNextId();
         System.out.println("[NodeController] Setting nextId = " + req.getId());
         state.setNextId(req.getId());
+
+        if (joinRedistribution != null
+                && req.getId() != oldNext
+                && req.getId() != state.getCurrentId()) {
+            joinRedistribution.onNextNeighbourChanged();
+        }
         return ResponseEntity.ok().build();
     }
 
