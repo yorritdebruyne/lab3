@@ -15,10 +15,12 @@ public class NodeRegistry {
     private final NavigableMap<Integer, NodeInfo> nodes = new TreeMap<>();
     private final HashService hashService;
     private final NodeRegistryStorage storage;
+    private final EventService events;
 
-    public NodeRegistry(HashService hashService, NodeRegistryStorage storage) {
+    public NodeRegistry(HashService hashService, NodeRegistryStorage storage, EventService events) {
         this.hashService = hashService;
         this.storage = storage;
+        this.events = events;
         // Load from disk
         storage.load().forEach(n -> nodes.put(n.getId(), n));
     }
@@ -30,6 +32,12 @@ public class NodeRegistry {
      * the fresh httpPort and tcpPort are stored and nodes.json is rewritten.
      */
     public synchronized NodeInfo addNode(String name, String ip, int port, int tcpPort) {
+        // A node bootstraps via BOTH multicast and the REST fallback, so addNode is
+        // often called twice for the same node within ~1s. Detect whether this name
+        // is genuinely new BEFORE the upsert, so the activity feed shows ONE JOIN per
+        // node instead of a duplicate from the re-registration.
+        boolean isNew = nodes.values().stream().noneMatch(n -> n.getName().equals(name));
+
         // Remove stale entry for this name so re-registration always refreshes ports
         nodes.values().removeIf(n -> n.getName().equals(name));
 
@@ -38,6 +46,14 @@ public class NodeRegistry {
 
         nodes.put(id, node);
         storage.save(nodes.values());
+
+        // Publish to the live activity feed. Done HERE (not in the controller) so
+        // BOTH registration paths emit the event: REST (NamingServerController) and
+        // multicast (MulticastListener) both go through this method. Only for a
+        // genuinely new node, so a re-registration doesn't double-log.
+        if (events != null && isNew) {
+            events.publish("JOIN", name + " joined the ring (id " + id + ")", "naming-server");
+        }
         return node;
     }
 
@@ -62,6 +78,11 @@ public class NodeRegistry {
         key.ifPresent(k -> {
             nodes.remove(k);
             storage.save(nodes.values());
+            // Failures and graceful shutdowns both reach removeNode, so a crash
+            // surfaces as a LEAVE in the feed automatically.
+            if (events != null) {
+                events.publish("LEAVE", name + " left the ring", "naming-server");
+            }
         });
     }
 

@@ -5,10 +5,13 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -41,6 +44,7 @@ public class NodeController {
     private final FileRegistry   fileRegistry;
     private final NodeIpLookup   ipLookup;
     private final NodeJoinRedistributionService joinRedistribution;
+    private final ReplicationService replicationService;
 
     @Value("${node.replicas.dir:replicas}")
     private String replicasDir;
@@ -50,12 +54,14 @@ public class NodeController {
 
     public NodeController(NodeState state, FileLogService fileLogService,
                           FileRegistry fileRegistry, NodeIpLookup ipLookup,
-                          NodeJoinRedistributionService joinRedistribution) {
+                          NodeJoinRedistributionService joinRedistribution,
+                          ReplicationService replicationService) {
         this.state              = state;
         this.fileLogService     = fileLogService;
         this.fileRegistry       = fileRegistry;
         this.ipLookup           = ipLookup;
         this.joinRedistribution = joinRedistribution;
+        this.replicationService = replicationService;
     }
 
     // =========================================================================
@@ -172,6 +178,88 @@ public class NodeController {
         } catch (Exception e) {
             System.err.println("[NodeController] Could not list local files: " + e.getMessage());
             return ResponseEntity.ok(List.of());
+        }
+    }
+
+    /**
+     * Returns the filenames ACTUALLY stored in this node's replicas/ folder —
+     * the files this node owns and physically holds a replica for.
+     *
+     * Distinct from /node/filelist (the gossiped FileRegistry, which lists every
+     * filename known anywhere in the system). The GUI uses this so the "Replica
+     * Files" panel shows what the node truly holds, not every known name.
+     */
+    @GetMapping("/replicas")
+    public ResponseEntity<List<String>> listReplicaFiles() {
+        try {
+            Files.createDirectories(Paths.get(replicasDir));
+            List<String> files = Files.list(Paths.get(replicasDir))
+                    .filter(Files::isRegularFile)
+                    .map(p -> p.getFileName().toString())
+                    .collect(Collectors.toList());
+            return ResponseEntity.ok(files);
+        } catch (Exception e) {
+            System.err.println("[NodeController] Could not list replica files: " + e.getMessage());
+            return ResponseEntity.ok(List.of());
+        }
+    }
+
+    // =========================================================================
+    // EXPANSION — GUI file upload
+    // =========================================================================
+
+    /**
+     * Accepts a file uploaded from the GUI, stores it in this node's local/ folder,
+     * and replicates it to its owner via the EXISTING replication pipeline — the same
+     * path FileScanner and FolderWatcher use. The owner is decided purely by the
+     * file's hash; this endpoint adds no new placement logic.
+     *
+     * Hardened against the common upload risks:
+     *   - empty upload or blank filename            → 400 Bad Request
+     *   - directory components / path traversal      → stripped, and re-validated to
+     *                                                   stay inside local/ (400 if not)
+     *   - oversized upload                           → 413 (capped by
+     *                                                   spring.servlet.multipart.*)
+     */
+    @PostMapping("/upload")
+    public ResponseEntity<Map<String, String>> upload(@RequestParam("file") MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No file provided or file is empty"));
+        }
+
+        // Keep only the base name and reject traversal attempts (e.g. "../../x").
+        String raw = file.getOriginalFilename();
+        if (raw == null || raw.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Missing filename"));
+        }
+        String filename = Paths.get(raw).getFileName().toString();
+        if (filename.isBlank() || filename.contains("..")) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid filename"));
+        }
+
+        try {
+            Path localRoot = Paths.get(localDir).toAbsolutePath().normalize();
+            Files.createDirectories(localRoot);
+            Path dest = localRoot.resolve(filename).normalize();
+
+            // Defence in depth: the resolved path must stay inside local/.
+            if (!dest.startsWith(localRoot)) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Invalid file path"));
+            }
+
+            file.transferTo(dest);                  // write into local/
+            fileRegistry.addFile(filename);         // make the file known to the ring
+            replicationService.replicate(filename); // hash → owner → TCP (existing pipeline)
+
+            System.out.println("[NodeController] Uploaded and replicated: " + filename);
+            return ResponseEntity.ok(Map.of(
+                    "status", "stored",
+                    "filename", filename,
+                    "node", state.getName() == null ? "" : state.getName()
+            ));
+        } catch (Exception e) {
+            System.err.println("[NodeController] Upload failed for " + filename + ": " + e.getMessage());
+            return ResponseEntity.status(500).body(Map.of("error", "Could not store file: " + e.getMessage()));
         }
     }
 

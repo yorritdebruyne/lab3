@@ -15,7 +15,7 @@ class NamingServerControllerUnitTest {
     @Test
     void addNode_directCall() {
         NodeRegistry registry = mock(NodeRegistry.class);
-        NamingServerController controller = new NamingServerController(registry, new HashService(), null);
+        NamingServerController controller = new NamingServerController(registry, new HashService());
 
         NodeInfo node = new NodeInfo(100, "node1", "1.2.3.4");
         when(registry.addNode("node1", "1.2.3.4", 8081, 9000)).thenReturn(node);
@@ -33,7 +33,7 @@ class NamingServerControllerUnitTest {
     @Test
     void getFileOwner_directCall() {
         NodeRegistry registry = mock(NodeRegistry.class);
-        NamingServerController controller = new NamingServerController(registry, new HashService(), null);
+        NamingServerController controller = new NamingServerController(registry, new HashService());
 
         NodeInfo owner = new NodeInfo(777, "nodeX", "10.0.0.7");
         when(registry.findOwnerForFile("file.txt")).thenReturn(owner);

@@ -29,7 +29,7 @@ class NodeRegistryTest {
                 // no-op for tests
             }
         };
-        registry = new NodeRegistry(hashService, storage);
+        registry = new NodeRegistry(hashService, storage, null);
     }
 
     @Test
@@ -69,7 +69,7 @@ class NodeRegistryTest {
             public List<NodeInfo> load() { return List.of(); }
             @Override
             public void save(Collection<NodeInfo> nodes) {}
-        });
+        }, null);
 
         assertNull(emptyRegistry.findOwnerForFile("file.txt"));
     }

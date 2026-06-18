@@ -87,6 +87,26 @@ public class NodeLaunchController {
         }
     }
 
+    /**
+     * Hard-kills a node container with SIGKILL (Docker /kill), simulating a real
+     * CRASH. Unlike /stop (which sends SIGTERM and lets Spring run its graceful
+     * @PreDestroy ShutdownService), /kill gives the JVM no chance to shut down
+     * cleanly — so the ring must DETECT the failure (PingScheduler) and recover
+     * via the FailureAgent. This is what the GUI "kill" button uses.
+     *
+     * POST /api/nodes/kill/{serviceName}
+     */
+    @PostMapping("/kill/{serviceName}")
+    public ResponseEntity<Map<String, String>> killNode(@PathVariable String serviceName) {
+        String containerName = "projectds-" + serviceName + "-1";
+        try {
+            dockerPost("/containers/" + containerName + "/kill"); // SIGKILL — no graceful shutdown
+            return ResponseEntity.ok(Map.of("status", "killed", "container", containerName));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
     private String dockerPost(String path) throws Exception {
         ProcessBuilder pb = new ProcessBuilder(
             "curl", "--unix-socket", DOCKER_SOCKET,

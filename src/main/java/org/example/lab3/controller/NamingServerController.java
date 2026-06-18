@@ -5,7 +5,6 @@ import org.example.lab3.model.AddNodeRequest;
 import org.example.lab3.model.FileOwnerResponse;
 import org.example.lab3.model.NeighbourResponse;
 import org.example.lab3.model.NodeInfo;
-import org.example.lab3.service.EventService;
 import org.example.lab3.service.HashService;
 import org.example.lab3.service.NodeRegistry;
 import org.springframework.context.annotation.Profile;
@@ -24,33 +23,27 @@ public class NamingServerController {
 
     private final NodeRegistry registry;
     private final HashService hashService;
-    private final EventService events;
 
-    public NamingServerController(NodeRegistry registry, HashService hashService, EventService events) {
+    public NamingServerController(NodeRegistry registry, HashService hashService) {
         this.registry = registry;
         this.hashService = hashService;
-        this.events = events;
     }
 
     /**
      * Registers a new node. Now passes the port from the request body
      * so the naming server stores the correct port per node.
+     * (The JOIN activity-feed event is emitted by NodeRegistry.addNode so that
+     * multicast registration is covered too.)
      */
     @PostMapping("/nodes")
     public ResponseEntity<NodeInfo> addNode(@RequestBody AddNodeRequest req) {
         NodeInfo node = registry.addNode(req.getName(), req.getIp(), req.getPort(), req.getTcpPort());
-        if (events != null) {
-            events.publish("JOIN", node.getName() + " joined the ring (id " + node.getId() + ")", "naming-server");
-        }
         return ResponseEntity.ok(node);
     }
 
     @DeleteMapping("/nodes/{name}")
     public ResponseEntity<Void> removeNode(@PathVariable String name) {
         registry.removeNode(name);
-        if (events != null) {
-            events.publish("LEAVE", name + " left the ring", "naming-server");
-        }
         return ResponseEntity.noContent().build();
     }
 

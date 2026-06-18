@@ -25,7 +25,8 @@ class ReplicationServiceTest {
         state              = new NodeState();
         tcpClient          = mock(TcpFileClient.class);
         fileLogService     = mock(FileLogService.class);
-        replicationService = new ReplicationService(state, tcpClient, fileLogService);
+        replicationService = new ReplicationService(state, tcpClient, fileLogService, null,
+                mock(NodeIpLookup.class));
 
         setField(replicationService, "localDir", tempDir.toString());
         setField(replicationService, "namingServerUrl", "http://localhost:8080");

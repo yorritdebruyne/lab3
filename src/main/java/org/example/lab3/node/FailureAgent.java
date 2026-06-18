@@ -65,16 +65,18 @@ public class FailureAgent {
     private final NodeIpLookup   ipLookup;
     private final TcpFileClient  tcpClient;
     private final FileRegistry   fileRegistry;
+    private final EventPublisher eventPublisher;
     private final RestTemplate   restTemplate = new RestTemplate();
 
     public FailureAgent(NodeState state, FileLogService fileLogService,
                         NodeIpLookup ipLookup, TcpFileClient tcpClient,
-                        FileRegistry fileRegistry) {
+                        FileRegistry fileRegistry, EventPublisher eventPublisher) {
         this.state          = state;
         this.fileLogService = fileLogService;
         this.ipLookup       = ipLookup;
         this.tcpClient      = tcpClient;
         this.fileRegistry   = fileRegistry;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -88,6 +90,14 @@ public class FailureAgent {
         int failingNodeId = payload.getFailingNodeId();
         System.out.println("[FailureAgent] Running on node " + state.getCurrentId()
                 + " — recovering files from failed node " + failingNodeId);
+
+        // Report this hop to the live feed. `source` is THIS node's name (set by
+        // EventPublisher), so the GUI can trace the agent's path around the ring and
+        // animate a pulse that follows it node-by-node — driven by real visits, not faked.
+        if (eventPublisher != null) {
+            eventPublisher.publish("FAILURE",
+                    "FailureAgent visiting (recovering from node " + failingNodeId + ")");
+        }
 
         // Get the IP of the failed node so we can compare with FileLog download locations
         String failingNodeIp = ipLookup.getIpForId(failingNodeId);

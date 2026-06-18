@@ -40,7 +40,7 @@
 
 <script setup>
 import { ref, watch } from 'vue'
-import { getNodeLocalFiles, getNodeFileList } from '../api.js'
+import { getNodeLocalFiles, getNodeFileList, getNodeReplicaFiles } from '../api.js'
 
 const props = defineProps({
   node: { type: Object, required: true }
@@ -58,13 +58,16 @@ async function loadFiles() {
     // Local files — simple string list from GET /node/files
     localFiles.value = await getNodeLocalFiles(props.node.ip, props.node.port)
 
-    // File registry — FileEntry list from GET /node/filelist
-    // These are files this node knows about (replicas + system-wide)
-    // We show only entries that are NOT in localFiles as "replicas"
-    const allEntries = await getNodeFileList(props.node.ip, props.node.port)
-    replicaFiles.value = allEntries.filter(
-        entry => !localFiles.value.includes(entry.filename)
-    )
+    // Replica files — the filenames ACTUALLY in this node's replicas/ folder
+    // (GET /node/replicas), i.e. the files this node owns and physically holds.
+    // NOTE: we do NOT derive this from /node/filelist (the gossiped FileRegistry),
+    // because that lists every filename known system-wide — which would make every
+    // node look like it holds every file. Lock state is cross-referenced from the
+    // registry so the 🔒 badge still works.
+    const replicaNames = await getNodeReplicaFiles(props.node.ip, props.node.port)
+    const registry = await getNodeFileList(props.node.ip, props.node.port)
+    const lockedSet = new Set(registry.filter(e => e.locked).map(e => e.filename))
+    replicaFiles.value = replicaNames.map(name => ({ filename: name, locked: lockedSet.has(name) }))
   } catch (e) {
     error.value = 'Could not load files from node'
     localFiles.value = []

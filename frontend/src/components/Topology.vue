@@ -41,18 +41,25 @@
         <text class="node-name" y="-22" text-anchor="middle">{{ item.n.name }}</text>
         <text class="node-id" y="30" text-anchor="middle">{{ item.n.id }}</text>
       </g>
+
+      <!-- SyncAgent pulse: continuous gossip hop to `next` (illustrative of the 5s sync) -->
+      <circle v-if="syncPos" class="sync-pulse" :cx="syncPos.x" :cy="syncPos.y" r="6" />
+      <!-- FailureAgent pulse: follows REAL FAILURE events around the ring -->
+      <circle v-if="failurePos" class="failure-pulse" :cx="failurePos.x" :cy="failurePos.y" r="9" />
     </svg>
 
     <div v-if="nodes.length" class="topo-legend">
       <span><i class="lg ring-dot"></i> ring position = hash</span>
       <span><i class="lg arrow-dot"></i> next pointer</span>
       <span><i class="lg file-dot-lg"></i> file (colour = owner)</span>
+      <span><i class="lg sync-lg"></i> SyncAgent → next</span>
+      <span><i class="lg fail-lg"></i> FailureAgent</span>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { getNodeLocalFiles, getFileHash } from '../api.js'
 
 const props = defineProps({
@@ -156,6 +163,100 @@ async function loadFiles() {
 
 // Re-resolve whenever the set of nodes changes (add / remove / kill).
 watch(() => props.nodes.map(n => n.id).join(','), loadFiles, { immediate: true })
+
+// ── agent visualization ─────────────────────────────────────────────
+// Resolve a ring position for a node by id or name, using the decluttered layout
+// so the pulse sits exactly where the marker is drawn.
+function posForId(id) {
+  const item = nodeLayout.value.find(o => o.n.id === id)
+  return item ? polar(item.deg) : null
+}
+function posForName(name) {
+  const item = nodeLayout.value.find(o => o.n.name === name)
+  return item ? polar(item.deg) : null
+}
+
+// SyncAgent: every node pushes its file list to its `next` neighbour ~every 5s.
+// We REPRESENT that continuous gossip with a pulse that hops next→next around the
+// ring. (Illustrative of the real periodic behaviour, sped up for visibility — it
+// is NOT tied to individual events, unlike the FailureAgent pulse below.)
+//
+// The pulse is animated by tweening its ANGLE (radius stays = R), so it travels
+// ALONG the ring arc instead of cutting straight across to the next node.
+const syncId = ref(null)
+const syncAngle = ref(null)          // current animated angle, in degrees
+let syncTimer = null
+let syncRaf = null
+const syncPos = computed(() => (syncAngle.value == null ? null : polar(syncAngle.value)))
+
+function nodeDegById(id) {
+  const item = nodeLayout.value.find(o => o.n.id === id)
+  return item ? item.deg : null
+}
+
+function advanceSync() {
+  const ids = nodeLayout.value.map(o => o.n.id) // sorted by id == ring order
+  if (ids.length === 0) { syncId.value = null; syncAngle.value = null; return }
+  const cur = ids.indexOf(syncId.value)
+  const nextId = ids[(cur + 1) % ids.length]    // next neighbour (wraps)
+  syncId.value = nextId
+  const targetDeg = nodeDegById(nextId)
+  if (targetDeg == null) return
+  if (syncAngle.value == null) { syncAngle.value = targetDeg; return } // first time: snap
+  animateSyncTo(targetDeg)
+}
+
+// Tween the angle CLOCKWISE (matching the next-pointer direction) so the pulse
+// follows the circle; the wrap hop sweeps the long way around the empty arc.
+function animateSyncTo(targetDeg) {
+  cancelAnimationFrame(syncRaf)
+  const fromDeg = syncAngle.value
+  const delta = (((targetDeg - fromDeg) % 360) + 360) % 360 // clockwise 0..360
+  if (delta < 0.5) { syncAngle.value = targetDeg; return }
+  const dur = 700, start = performance.now()
+  function step(now) {
+    const t = Math.min(1, (now - start) / dur)
+    const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2 // easeInOutQuad
+    syncAngle.value = fromDeg + delta * eased
+    if (t < 1) syncRaf = requestAnimationFrame(step)
+    else syncAngle.value = (((fromDeg + delta) % 360) + 360) % 360
+  }
+  syncRaf = requestAnimationFrame(step)
+}
+
+// FailureAgent: driven by REAL events. The agent emits a FAILURE event from each
+// node it visits (event.source = that node's name), so the red pulse follows the
+// agent's actual path around the ring. A freshness guard ignores the recent-event
+// replay on connect so old failures don't re-trigger a pulse.
+const failureName   = ref(null)
+const failureActive = ref(false)
+const failurePos = computed(() => (failureActive.value ? posForName(failureName.value) : null))
+let failureHideTimer = null
+let agentSource = null
+
+function onAgentEvent(msg) {
+  let e
+  try { e = JSON.parse(msg.data) } catch { return }
+  if (e.type !== 'FAILURE') return
+  if (Date.now() - (e.timestamp || 0) > 8000) return // ignore replayed history
+  failureName.value = e.source
+  failureActive.value = true
+  clearTimeout(failureHideTimer)
+  failureHideTimer = setTimeout(() => { failureActive.value = false }, 3500)
+}
+
+onMounted(() => {
+  advanceSync()
+  syncTimer = setInterval(advanceSync, 2500)
+  agentSource = new EventSource(`${window.location.origin}/api/events`)
+  agentSource.addEventListener('system', onAgentEvent)
+})
+onUnmounted(() => {
+  clearInterval(syncTimer)
+  cancelAnimationFrame(syncRaf)
+  clearTimeout(failureHideTimer)
+  if (agentSource) agentSource.close()
+})
 </script>
 
 <style scoped>
@@ -200,4 +301,24 @@ watch(() => props.nodes.map(n => n.id).join(','), loadFiles, { immediate: true }
 .topo-legend .arrow-dot { width: 0; height: 0; border-left: 8px solid #3a4d6f;
                           border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
 .topo-legend .file-dot-lg { background: #4a9eff; border-radius: 50%; }
+.topo-legend .sync-lg { background: #00d0ff; border-radius: 50%; box-shadow: 0 0 5px #00d0ff; }
+.topo-legend .fail-lg { background: #e74c3c; border-radius: 50%; box-shadow: 0 0 5px #e74c3c; }
+
+/* SyncAgent pulse — glides between nodes (transition) with a soft glow */
+.sync-pulse {
+  fill: #00d0ff;
+  filter: drop-shadow(0 0 5px #00d0ff);
+  opacity: 0.9;
+  /* motion handled per-frame in JS (angle tween), so no CSS position transition */
+}
+/* FailureAgent pulse — follows real events, glides + pulses */
+.failure-pulse {
+  fill: none;
+  stroke: #e74c3c;
+  stroke-width: 3;
+  filter: drop-shadow(0 0 6px #e74c3c);
+  transition: cx 0.5s ease, cy 0.5s ease;
+  animation: fail-throb 0.7s ease-in-out infinite;
+}
+@keyframes fail-throb { 0%,100% { r: 9px; opacity: 1; } 50% { r: 13px; opacity: 0.4; } }
 </style>

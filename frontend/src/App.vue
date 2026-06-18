@@ -77,6 +77,7 @@
         <!-- System-wide tools (always visible) -->
         <Topology :nodes="nodes" :crashing="crashingNodes" :selectedId="selectedNode?.id" @select="selectNode" />
         <EventFeed />
+        <FileUpload :targetNode="selectedNode" @uploaded="onFileUploaded" />
         <LoadChart :nodes="nodes" />
         <HashInspector :nodes="nodes" />
 
@@ -101,7 +102,8 @@ import HashInspector from './components/HashInspector.vue'
 import LoadChart from './components/LoadChart.vue'
 import Topology from './components/Topology.vue'
 import EventFeed from './components/EventFeed.vue'
-import { getAllNodes, removeNode as apiRemoveNode, launchNode, stopNode } from './api.js'
+import FileUpload from './components/FileUpload.vue'
+import { getAllNodes, removeNode as apiRemoveNode, launchNode, stopNode, killNode as apiKillNode } from './api.js'
 
 const nodes = ref([])
 const selectedNode = ref(null)
@@ -159,6 +161,12 @@ function selectNode(node) {
   selectedNode.value = node
 }
 
+// After an upload, give the node a moment to replicate over TCP, then refresh
+// so the new file appears on the ring and in the load chart.
+function onFileUploaded() {
+  setTimeout(loadAll, 1200)
+}
+
 async function removeNode(node) {
   if (!confirm(`Remove node "${node.name}" from the ring?`)) return
   try {
@@ -183,7 +191,7 @@ async function killNode(node) {
   }
   if (!confirm(`Hard-kill "${node.name}"? This simulates a crash — the ring must detect and recover on its own.`)) return
   try {
-    await stopNode(svc.service)
+    await apiKillNode(svc.service)   // SIGKILL — a real crash, so the FailureAgent runs (not a graceful stop)
     if (!crashingNodes.value.includes(node.name)) crashingNodes.value.push(node.name)
   } catch (e) {
     alert('Could not kill node: ' + e.message)
