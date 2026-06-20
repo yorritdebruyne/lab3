@@ -110,8 +110,8 @@ const selectedNode = ref(null)
 const namingServerOnline = ref(false)
 let refreshTimer = null
 
-// Names of nodes that were hard-killed (Tier 1.1) and not yet dropped from the
-// ring. Kept so the UI shows them "crashing" until the failure is detected.
+// Names of nodes that were hard-killed and not yet dropped from the ring.
+// Kept so the UI shows them "crashing" until the failure is detected.
 const crashingNodes = ref([])
 
 // Add node modal state
@@ -180,9 +180,9 @@ async function removeNode(node) {
   }
 }
 
-// Tier 1.1 — hard-kill a node to simulate a crash. We deliberately do NOT call
-// the graceful DELETE /api/nodes here: we stop the container and let the ring
-// DETECT the failure itself (PingScheduler → FailureHandler → FailureAgent).
+// Hard-kill a node to simulate a crash. We deliberately do NOT call the graceful
+// DELETE /api/nodes here: we stop the container and let the ring DETECT the
+// failure itself (PingScheduler → FailureHandler → FailureAgent).
 async function killNode(node) {
   const svc = launchableNodes.find(n => n.name === node.name)
   if (!svc) {

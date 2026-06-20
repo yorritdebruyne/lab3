@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Tests the EXPANSION GUI upload endpoint: a valid upload is stored in local/ and
+ * Tests the GUI upload endpoint: a valid upload is stored in local/ and
  * handed to the existing replication pipeline; bad input is rejected; and a
  * path-traversal filename is neutralised to a safe name inside local/.
  */

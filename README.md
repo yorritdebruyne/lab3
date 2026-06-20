@@ -240,8 +240,8 @@ sudo docker compose up -d
 ```powershell
 .\mvnw.cmd test
 ```
-56 tests, 0 failures (as of Lab 5). Controller tests cover the naming server,
-node endpoints, replication, and agent routing.
+111 tests, 0 failures. Tests cover the naming server, node endpoints,
+replication, join redistribution, the upload endpoint, and agent routing.
 
 ---
 
@@ -267,5 +267,69 @@ node endpoints, replication, and agent routing.
 - Nginx (reverse proxy), Docker + Docker Compose
 - UDP multicast (discovery), raw TCP sockets (file replication)
 
-See [`Claude.md`](Claude.md) for deep implementation notes and the **demo
-expansion backlog**.
+---
+
+## 10. Expansions
+
+Beyond the base assignment, the project adds a live **monitoring & operations GUI**
+and several **resilience improvements** to the core replication logic. The network
+algorithm (hashing, ownership, replication, agents) is unchanged — these build on
+top of it.
+
+### 10.1 Live monitoring & visualization
+- **Ring topology** (`Topology.vue`) — a real-time SVG ring: each node is placed at
+  the angle of its ring ID, files appear as dots coloured by their owner, edges are
+  drawn as arcs, and the **SyncAgent** is animated as a pulse that travels along the
+  ring to the next node.
+- **Hash Inspector** — type a filename to see its ring hash and the owner the naming
+  server computes for it (`GET /api/files/hash`), so the ownership rule is visible.
+- **Load Distribution** chart — files owned per node (read from each node's actual
+  `replicas/` folder), showing how evenly the hash spreads ownership.
+- **Live event feed** — the naming server streams `JOIN` / `LEAVE` / `REPLICATE` /
+  `REDISTRIBUTE` / `FAILURE` / `DELETE` events to the browser over Server-Sent Events
+  (`GET /api/events`; `EventService`, `EventController`, node-side `EventPublisher`).
+- **Agent visualization** — both the SyncAgent and the **FailureAgent** appear as
+  moving pulses driven by the real hops the nodes report, so the agents' paths around
+  the ring are visible during a crash.
+
+### 10.2 Interactive cluster control
+- **Add node** — starts a pre-created container through the Docker socket API.
+- **Graceful leave vs. hard crash** — *Remove/Stop* sends SIGTERM (runs the graceful
+  `ShutdownService`); the **Kill** button sends SIGKILL (`POST /api/nodes/kill`) to
+  simulate a real crash, so the ring must detect the failure and recover on its own.
+
+### 10.3 GUI file management
+- **Upload** (`POST /node/upload`) — drag-drop a file onto a node; it is stored in
+  that node's `local/` and replicated through the normal pipeline.
+- **Download** (`GET /node/file/{filename}`) — save any file a node holds (from
+  `local/` or `replicas/`) to your computer.
+- **Delete** (`DELETE /node/local/{filename}`) — remove a file from the system: the
+  original plus the owner's replica.
+- **Send to another node** — fetch a file from one node and re-upload it to a target
+  node, reusing the existing upload path (no new transfer logic).
+
+### 10.4 Resilience & correctness optimizations
+These keep storage consistent through churn (joins, graceful leaves, crashes,
+rejoins) with no data loss. They reuse the authoritative ownership lookup and the
+existing TCP transfer — no new placement logic.
+
+- **Join redistribution** (`NodeJoinRedistributionService`) — when a newcomer slots
+  into the ring, the previous owner hands over the files that now hash to the
+  newcomer, using a safe **transfer-then-delete** (a copy is never dropped before the
+  new owner has it).
+- **Anti-entropy reconcile sweep** (`ReconcileScheduler`, every 10 s) — each node
+  sheds any replica it no longer owns **and** re-pushes its `local/` files to their
+  current owner, so every node's `replicas/` folder self-converges to exactly what it
+  owns after any churn or leftover state.
+- **Crash self-heal** — after an owner crashes, the surviving origins re-replicate
+  their files to the new owner within one sweep, restoring the replicas a crash would
+  otherwise orphan.
+- **Own-file replication to the previous node** — when a node is the owner of its
+  *own* local file, the replica is placed on its **previous neighbour** (rather than a
+  self-referencing log), so every file — including a node's own — has an off-node copy
+  that survives that node crashing. The redistribution and reconcile passes recognise
+  these backups (download location == owner) and leave them in place instead of
+  shipping them back onto the owner.
+- **Deletion propagation fix** — `FolderWatcher` notifies the owner on the *owner's*
+  HTTP port (each node runs on its own port), so deleting a local file correctly
+  removes its replica on the other node.

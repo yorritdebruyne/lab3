@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
- * EventController exposes the live activity feed (Tier 2).
+ * EventController exposes the live activity feed.
  *
  *   GET  /api/events  → Server-Sent Events stream the browser subscribes to.
  *   POST /api/events  → publish an event (used by NODES to report what they did,
