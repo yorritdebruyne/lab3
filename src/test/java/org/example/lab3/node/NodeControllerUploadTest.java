@@ -34,7 +34,7 @@ class NodeControllerUploadTest {
         FileRegistry fileRegistry = new FileRegistry();
         FileLogService fileLogService = mock(FileLogService.class);
 
-        controller = new NodeController(state, fileLogService, fileRegistry, null, null, replicationService);
+        controller = new NodeController(state, fileLogService, fileRegistry, null, null, replicationService, null);
         setField(controller, "localDir", tempDir.resolve("local").toString());
         setField(controller, "replicasDir", tempDir.resolve("replicas").toString());
     }

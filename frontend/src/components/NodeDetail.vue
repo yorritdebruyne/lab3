@@ -52,13 +52,17 @@
       </div>
     </div>
 
-    <div v-if="loading" class="loading-text">Loading state...</div>
-    <div v-if="error" class="error-text">{{ error }}</div>
+    <!-- Fixed-height footer so toggling a status line never changes the card
+         height (otherwise the "Files on node" card below it gets pushed down). -->
+    <div class="status-footer">
+      <span v-if="loading" class="loading-text">Loading state...</span>
+      <span v-else-if="error" class="error-text">{{ error }}</span>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { getNodeState } from '../api.js'
 
 const props = defineProps({
@@ -68,9 +72,11 @@ const props = defineProps({
 const state = ref(null)
 const loading = ref(false)
 const error = ref(null)
+// Spinner only on the first load for a node; background refreshes update in place.
+const hasLoadedOnce = ref(false)
 
 async function loadState() {
-  loading.value = true
+  if (!hasLoadedOnce.value) loading.value = true
   error.value = null
   try {
     state.value = await getNodeState(props.node.ip, props.node.port)
@@ -79,10 +85,25 @@ async function loadState() {
     state.value = null
   } finally {
     loading.value = false
+    hasLoadedOnce.value = true
   }
 }
 
-watch(() => props.node, loadState, { immediate: true })
+// Key on the node ID, not the object reference: the parent's 5s auto-refresh
+// hands us a fresh object for the SAME node, and reacting to that would re-show
+// the spinner and jump the layout every cycle.
+watch(() => props.node?.id, (newId, oldId) => {
+  if (newId !== oldId) hasLoadedOnce.value = false
+  loadState()
+}, { immediate: true })
+
+// Silent periodic refresh (prev/next IDs change on topology churn) — never shows
+// the spinner, so the card height stays constant.
+let refreshTimer = null
+onMounted(() => {
+  refreshTimer = setInterval(() => { if (hasLoadedOnce.value) loadState() }, 5000)
+})
+onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 </script>
 
 <style scoped>
@@ -150,7 +171,13 @@ watch(() => props.node, loadState, { immediate: true })
 
 .ring-arrow { font-size: 18px; color: #1e2d4a; }
 
-.loading-text, .error-text { font-size: 11px; margin-top: 12px; }
+.status-footer {
+  min-height: 18px;
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+}
+.loading-text, .error-text { font-size: 11px; }
 .loading-text { color: #4a6080; }
 .error-text { color: #e74c3c; }
 </style>

@@ -14,7 +14,7 @@ class NodeControllerTest {
         state = new NodeState();
         FileLogService fileLogService = new FileLogService();
         FileRegistry fileRegistry = new FileRegistry(); // add this
-        controller = new NodeController(state, fileLogService, fileRegistry, null, null, null);
+        controller = new NodeController(state, fileLogService, fileRegistry, null, null, null, null);
     }
 
     @Test

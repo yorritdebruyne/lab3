@@ -39,9 +39,6 @@ public class FolderWatcher {
     @Value("${namingserver.url}")
     private String namingServerUrl;
 
-    @Value("${server.port:8081}")
-    private int serverPort;
-
     private final ReplicationService replicationService;
     private final NodeState          state;
     private final RestTemplate       restTemplate = new RestTemplate();
@@ -125,7 +122,9 @@ public class FolderWatcher {
             // If we are the owner ourselves, nothing to do remotely
             if (owner.getId() == state.getCurrentId()) return;
 
-            restTemplate.delete("http://" + owner.getIp() + ":" + serverPort
+            // Use the OWNER's own HTTP port (each node may run on a different port,
+            // e.g. 8081/8082/8083 on the VM) — not our own serverPort.
+            restTemplate.delete("http://" + owner.getIp() + ":" + owner.getPort()
                     + "/node/replica/" + filename);
             System.out.println("[FolderWatcher] Notified owner " + owner.getIp()
                     + " to delete replica of: " + filename);

@@ -83,7 +83,7 @@
 
         <!-- Per-node detail (when a node is selected) -->
         <NodeDetail v-if="selectedNode" :node="selectedNode" />
-        <FileList v-if="selectedNode" :node="selectedNode" />
+        <FileList v-if="selectedNode" :node="selectedNode" :nodes="nodes" @changed="onFileUploaded" />
         <div v-else class="empty-state">
           <span class="empty-icon">⬡</span>
           <p>Select a node to view its details and files</p>

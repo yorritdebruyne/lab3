@@ -1,7 +1,10 @@
 package org.example.lab3.node;
 
+import org.example.lab3.model.NodeInfo;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
@@ -45,6 +48,8 @@ public class NodeController {
     private final NodeIpLookup   ipLookup;
     private final NodeJoinRedistributionService joinRedistribution;
     private final ReplicationService replicationService;
+    private final EventPublisher eventPublisher;
+    private final RestTemplate   restTemplate = new RestTemplate();
 
     @Value("${node.replicas.dir:replicas}")
     private String replicasDir;
@@ -52,16 +57,21 @@ public class NodeController {
     @Value("${node.local.dir:local}")
     private String localDir;
 
+    @Value("${namingserver.url:}")
+    private String namingServerUrl;
+
     public NodeController(NodeState state, FileLogService fileLogService,
                           FileRegistry fileRegistry, NodeIpLookup ipLookup,
                           NodeJoinRedistributionService joinRedistribution,
-                          ReplicationService replicationService) {
+                          ReplicationService replicationService,
+                          EventPublisher eventPublisher) {
         this.state              = state;
         this.fileLogService     = fileLogService;
         this.fileRegistry       = fileRegistry;
         this.ipLookup           = ipLookup;
         this.joinRedistribution = joinRedistribution;
         this.replicationService = replicationService;
+        this.eventPublisher     = eventPublisher;
     }
 
     // =========================================================================
@@ -261,6 +271,135 @@ public class NodeController {
             System.err.println("[NodeController] Upload failed for " + filename + ": " + e.getMessage());
             return ResponseEntity.status(500).body(Map.of("error", "Could not store file: " + e.getMessage()));
         }
+    }
+
+    /**
+     * Streams a file's bytes back to the caller as a download. Looks in local/
+     * first (the original) and then replicas/ (the copy this node owns), so any
+     * node that physically holds the file can serve it.
+     *
+     * Used by the GUI for two things:
+     *   - "Download" — the browser saves the file to the user's computer.
+     *   - "Send to another node" — the browser fetches the bytes here and re-uploads
+     *     them to the target node's /node/upload (no new server-side transfer logic).
+     */
+    @GetMapping("/file/{filename}")
+    public ResponseEntity<byte[]> downloadFile(@PathVariable String filename) {
+        String safe = Paths.get(filename).getFileName().toString();
+        if (safe.isBlank() || safe.contains("..")) {
+            return ResponseEntity.badRequest().build();
+        }
+        Path local   = Paths.get(localDir, safe);
+        Path replica = Paths.get(replicasDir, safe);
+        Path src = Files.exists(local) ? local : (Files.exists(replica) ? replica : null);
+        if (src == null) {
+            return ResponseEntity.notFound().build();
+        }
+        try {
+            byte[] data = Files.readAllBytes(src);
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION,
+                            "attachment; filename=\"" + safe + "\"")
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                    .body(data);
+        } catch (Exception e) {
+            System.err.println("[NodeController] Could not read file " + safe + ": " + e.getMessage());
+            return ResponseEntity.status(500).build();
+        }
+    }
+
+    /**
+     * Deletes a file from the system, starting from the local/ original on THIS node.
+     *
+     * Steps (mirrors the spec's "delete" / FolderWatcher deletion path, but immediate):
+     *   1. Remove the local/ copy (and our own replica + log, if we also hold one).
+     *   2. Forget it in our FileRegistry, and ask our neighbours to forget it too
+     *      (best-effort; reduces gossip re-introduction of the name).
+     *   3. Ask the file's OWNER to drop its replica via the existing
+     *      DELETE /node/replica/{filename} endpoint (using the owner's own port).
+     *
+     * Note: this is for deleting an ORIGINAL (a file shown under "Local Files").
+     * Deleting only a replica is not exposed, because the reconcile/replication
+     * pipeline would just recreate it from the surviving original.
+     */
+    @DeleteMapping("/local/{filename}")
+    public ResponseEntity<Map<String, String>> deleteLocalFile(@PathVariable String filename) {
+        String safe = Paths.get(filename).getFileName().toString();
+        if (safe.isBlank() || safe.contains("..")) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid filename"));
+        }
+        try {
+            boolean removedLocal = Files.deleteIfExists(Paths.get(localDir, safe));
+            // If we happen to own a replica of it as well, drop that + its log.
+            Files.deleteIfExists(Paths.get(replicasDir, safe));
+            fileLogService.delete(safe);
+            fileRegistry.remove(safe);
+
+            // Tell the owner to drop its replica (immediate — don't wait for FolderWatcher).
+            notifyOwnerToDeleteReplica(safe);
+            // Best-effort: have immediate neighbours forget the name too.
+            broadcastRemove(safe);
+
+            System.out.println("[NodeController] Deleted from system: " + safe
+                    + " (localRemoved=" + removedLocal + ")");
+            if (eventPublisher != null) {
+                eventPublisher.publish("DELETE", "deleted " + safe + " from the system");
+            }
+            return ResponseEntity.ok(Map.of("status", "deleted", "filename", safe));
+        } catch (Exception e) {
+            System.err.println("[NodeController] Delete failed for " + safe + ": " + e.getMessage());
+            return ResponseEntity.status(500).body(Map.of("error", "Could not delete: " + e.getMessage()));
+        }
+    }
+
+    // Looks up the owner of a file via the naming server and asks it to delete its
+    // replica. Uses the owner's OWN HTTP port. Best-effort — failures are logged.
+    private void notifyOwnerToDeleteReplica(String filename) {
+        if (namingServerUrl == null || namingServerUrl.isBlank()) return;
+        try {
+            NodeInfo owner = restTemplate.getForObject(
+                    namingServerUrl + "/api/files/owner?filename=" + filename, NodeInfo.class);
+            if (owner == null || owner.getId() == state.getCurrentId()) return; // none, or it was us
+            restTemplate.delete("http://" + owner.getIp() + ":" + owner.getPort()
+                    + "/node/replica/" + filename);
+            System.out.println("[NodeController] Asked owner " + owner.getIp() + ":" + owner.getPort()
+                    + " to delete replica of " + filename);
+        } catch (Exception e) {
+            System.err.println("[NodeController] Could not notify owner to delete " + filename
+                    + ": " + e.getMessage());
+        }
+    }
+
+    // Best-effort: tell our immediate neighbours to forget a deleted filename. The
+    // SyncAgent only unions names, so without this a neighbour could re-introduce the
+    // (now empty) name; this clears the obvious cases. Reuses DELETE /node/forget.
+    private void broadcastRemove(String filename) {
+        if (ipLookup == null) return;
+        int myId = state.getCurrentId();
+        Stream.of(state.getNextId(), state.getPrevId())
+              .filter(id -> id != myId && id != -1)
+              .distinct()
+              .forEach(id -> {
+                  String addr = ipLookup.getIpForId(id);
+                  if (addr == null) return;
+                  try {
+                      restTemplate.delete("http://" + addr + "/node/forget/" + filename);
+                  } catch (Exception e) {
+                      System.err.println("[NodeController] forget broadcast failed for " + addr
+                              + ": " + e.getMessage());
+                  }
+              });
+    }
+
+    /**
+     * Removes a filename from THIS node's registry only (no file deletion, no further
+     * broadcast). Called by a neighbour's delete broadcast so the name stops being
+     * gossiped onward.
+     */
+    @DeleteMapping("/forget/{filename}")
+    public ResponseEntity<Void> forget(@PathVariable String filename) {
+        fileRegistry.remove(filename);
+        return ResponseEntity.noContent().build();
     }
 
     // =========================================================================

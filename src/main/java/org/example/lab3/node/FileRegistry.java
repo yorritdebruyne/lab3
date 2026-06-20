@@ -141,6 +141,21 @@ public class FileRegistry {
     }
 
     /**
+     * Removes a file from the registry (used when a file is deleted from the
+     * system via the GUI). Note: the SyncAgent's merge() only ever UNIONS names,
+     * so a neighbour that still knows the name can re-introduce it on a later sync —
+     * the bytes are gone either way; this just clears it locally and lets the
+     * delete broadcast clear the immediate neighbours too.
+     *
+     * @param filename The file to forget.
+     */
+    public void remove(String filename) {
+        if (entries.remove(filename) != null) {
+            System.out.println("[FileRegistry] Removed: " + filename);
+        }
+    }
+
+    /**
      * Returns the number of files currently in the registry.
      * Useful for logging and debugging.
      */

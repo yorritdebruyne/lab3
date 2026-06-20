@@ -102,3 +102,42 @@ export async function uploadFileToNode(port, file) {
     try { body = await res.json() } catch { /* non-JSON error body */ }
     return { ok: res.ok, status: res.status, body }
 }
+
+// Downloads a file's bytes from a node (local/ or replicas/) and saves it to the
+// user's computer. Fetches as a Blob and triggers a browser "Save as" via a
+// temporary <a download> — works through the Nginx proxy like every other call.
+export async function downloadFileFromNode(port, filename) {
+    const res = await fetch(`${NAMING_SERVER}/proxy/${port}/node/file/${encodeURIComponent(filename)}`)
+    if (!res.ok) throw new Error(`download failed (${res.status})`)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+}
+
+// Deletes a file from the system, starting from its local/ original on `port`'s node.
+// The node also asks the owner to drop its replica. Returns { ok, body }.
+export async function deleteFile(port, filename) {
+    const res = await fetch(`${NAMING_SERVER}/proxy/${port}/node/local/${encodeURIComponent(filename)}`, {
+        method: 'DELETE'
+    })
+    let body = {}
+    try { body = await res.json() } catch { /* may be empty */ }
+    return { ok: res.ok, status: res.status, body }
+}
+
+// Sends a file from one node to another: fetch the bytes from the source node, then
+// re-upload them to the target node's /node/upload (which stores it in the target's
+// local/ and replicates via the normal pipeline). No new server-side transfer logic.
+export async function sendFileToNode(sourcePort, filename, targetPort) {
+    const res = await fetch(`${NAMING_SERVER}/proxy/${sourcePort}/node/file/${encodeURIComponent(filename)}`)
+    if (!res.ok) throw new Error(`could not read file from source (${res.status})`)
+    const blob = await res.blob()
+    const file = new File([blob], filename)
+    return uploadFileToNode(targetPort, file)
+}
